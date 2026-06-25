@@ -346,14 +346,6 @@ if sub_page == "📊 PowerQuery 三表整合歷史紀錄":
     else:
         file_options = {f['name']: f['id'] for f in hist_pq_files}
         selected_pq_file = st.selectbox("🎯 請選擇欲調閱的歷史整合報告：", list(file_options.keys()))
-
-        try:
-            import python_calamine
-            engine = "calamine"
-        except ImportError:
-            engine = None
-        df = pd.read_excel(file_buffer, engine=engine)
-
         
         if selected_pq_file:
             try:
