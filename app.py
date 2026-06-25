@@ -42,10 +42,8 @@ except Exception:
     pass
 
 # =========================================================================
-# 🌐 1. Google Drive API 雲端連線與 ID 定義
+# 🌐 1. Google Drive API 雲端連線與 ID 定義 (改用 Streamlit Secrets)
 # =========================================================================
-SCOPES = ['https://www.googleapis.com/auth/drive']
-
 # 精準定義您提供的 Google Cloud 雲端硬碟物件 ID 
 ID_PROD_FOLDER = "1NtMAYb-SvdH6XMmqB5G07ttB-NuWCqDV"          # 商品列表 資料夾 ID
 ID_PRICE_SUMMARY_FOLDER = "1ZM4MscX0UO6rUHjKv-mN5fKDwxg53maZ" # 價格統整表 資料夾 ID
@@ -54,23 +52,22 @@ ID_HISTORY_INWARD_FOLDER = "1ZQ7x4BdRc6BJlURxQ61JqDKrKF7h_vSH"# 歷史入庫單 
 ID_BASE_FOLDER = "1HjMt8z8DXlqGhSqe50_hDR3f4LpVLK_w"          # 麗嬰採購統整 資料夾 ID
 
 @st.cache_resource
-def get_gdrive_service():
-    """從環境變數讀取憑證並建立 Google Drive 服務連線"""
-    gdrive_json_str = os.environ.get("GDRIVE_CREDENTIALS_JSON")
-    if gdrive_json_str:
-        creds_dict = json.loads(gdrive_json_str)
-        creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
-    else:
-        # 本地測試備用方案
-        SERVICE_ACCOUNT_FILE = 'gdrive_credentials.json'
-        if os.path.exists(SERVICE_ACCOUNT_FILE):
-            creds = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
-        else:
-            st.error("❌ 找不到 Google Drive 雲端憑證 (GDRIVE_CREDENTIALS_JSON)！")
-            st.stop()
-    return build('drive', 'v3', credentials=creds)
+def init_drive_service():
+    """讀取部署後設定在 Streamlit Secrets 的金鑰字典並建立連線"""
+    try:
+        google_secrets = st.secrets["textkey"]
+        credentials = service_account.Credentials.from_service_account_info(
+            google_secrets,
+            scopes=["https://www.googleapis.com/auth/drive"]
+        )
+        return build('drive', 'v3', credentials=credentials)
+    except Exception as e:
+        st.error(f"❌ 無法從 Streamlit Secrets 中讀取 `textkey` 憑證。錯誤訊息: {str(e)}")
+        st.info("💡 請確認您的 Secrets 設定格式是否正確（必須包含 textkey 區塊）。")
+        st.stop()
 
-service = get_gdrive_service()
+# 呼叫初始化函式取得服務個體
+service = init_drive_service()
 
 # =========================================================================
 # 🔍 2. 雲端檔案搜尋與讀寫核心工具函式
@@ -83,7 +80,7 @@ def find_gdrive_file(folder_id, file_name_keyword):
         files = results.get('files', [])
         if files:
             return files[0]['id'], files[0]['modifiedTime'], files[0]['name']
-    except Exception as e:
+    except Exception:
         pass
     return None, None, None
 
@@ -122,19 +119,18 @@ def upload_or_update_gdrive_file(folder_id, file_name, file_bytes, existing_file
         return file.get('id')
 
 def format_gdrive_time(time_str):
-    """將 Google API 返回的 ISO 時間格式轉換為易讀格式"""
+    """將 Google API 返回的 ISO 時間格式轉換為易讀格式 (台灣時間)"""
     if not time_str:
         return "❌ 雲端檔案尚未建立/不存在"
     try:
         dt = datetime.datetime.strptime(time_str.split('.')[0], "%Y-%m-%dT%H:%M:%S")
-        # 加上 8 小時轉為台灣時間
         dt = dt + datetime.timedelta(hours=8)
         return dt.strftime("%Y-%m-%d %H:%M:%S (台灣時間)")
     except:
         return time_str
 
 # -------------------------------------------------------------------------
-# 動態偵測三個核心主表的雲端 ID ＆ 最後修改時間
+# 動態偵測各核心主表的雲端 ID ＆ 最後修改時間
 # -------------------------------------------------------------------------
 ID_MASTER_FILE, TIME_MASTER, NAME_MASTER = find_gdrive_file(ID_BASE_FOLDER, "麗嬰採購產品總表")
 ID_LOCAL_PROD, TIME_PROD, NAME_PROD = find_gdrive_file(ID_PROD_FOLDER, "商品列表")
@@ -150,7 +146,7 @@ if ID_MASTER_FILE:
         with pd.ExcelFile(master_bytes) as xls:
             df_total = pd.read_excel(xls, "麗嬰國際產品總表")
             df_history = pd.read_excel(xls, "已匯入採購單")
-            df_delete_log = pd.read_excel(xls, "刪除紀錄") if "刪除紀錄" in xls.sheet_names else pd.DataFrame(columns=["UID", "名稱", "條碼", "零售價", "備註", "匯入檔名", "刪除時間"])
+            df_delete_log = pd.read_excel(xls, "刪除紀錄") if "刪除紀錄" in xls.sheet_names else pd.DataFrame(columns=["UID", "名稱", "條碼", "零售價", "備註", "匯入档名", "刪除時間"])
             df_meta = pd.read_excel(xls, "metadata")
             all_sheets = xls.sheet_names
         
