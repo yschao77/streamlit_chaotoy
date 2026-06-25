@@ -234,6 +234,9 @@ def save_to_master_xlsm(sheets_dict):
         return False
 
 def save_to_shopee_master_xlsm(sheets_dict):
+    # 🔴 修正：將 global 宣告移到最頂端
+    global ID_SHOPEE_MASTER
+    
     try:
         if ID_SHOPEE_MASTER:
             shopee_bytes = download_gdrive_file_to_bytes(ID_SHOPEE_MASTER)
@@ -254,9 +257,14 @@ def save_to_shopee_master_xlsm(sheets_dict):
                 
         out_buf = io.BytesIO()
         wb.save(out_buf)
-        # 更新或創建雲端蝦皮總表
-        global ID_SHOPEE_MASTER
-        ID_SHOPEE_MASTER = upload_or_update_gdrive_file(ID_SHOPEE_FOLDER, NAME_SHOPEE or "蝦皮賣場商品列表.xlsm", out_buf.getvalue(), existing_file_id=ID_SHOPEE_MASTER)
+        
+        # 這裡會修改到全域變數，因為最上方已經宣告 global，現在可以安全執行了
+        ID_SHOPEE_MASTER = upload_or_update_gdrive_file(
+            ID_SHOPEE_FOLDER, 
+            NAME_SHOPEE or "蝦皮賣場商品列表.xlsm", 
+            out_buf.getvalue(), 
+            existing_file_id=ID_SHOPEE_MASTER
+        )
         return True
     except Exception as e:
         st.error(f"❌ 寫入雲端蝦皮資料庫發生錯誤: {str(e)}")
