@@ -438,16 +438,16 @@ elif sub_page == "🧠 PowerQuery 執行三表整合":
                     df_final["麗嬰稅款"] = df_final.apply(lambda r: round(r["麗嬰批發含稅價"] - r["麗嬰未稅價"]) if (pd.notna(r["麗嬰批發含稅價"]) and pd.notna(r["麗嬰未稅價"])) else None, axis=1)
                     
                     # 輸出報表至雲端空間
-                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                    backup_filename = f"商品蝦皮麗嬰價格統整表_{timestamp}.xlsx"
+                    #timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    #backup_filename = f"商品蝦皮麗嬰價格統整表_{timestamp}.xlsx"
                     
-                    out_buf = io.BytesIO()
-                    df_final.to_excel(out_buf, index=False)
+                    #out_buf = io.BytesIO()
+                    #df_final.to_excel(out_buf, index=False)
                     
                     # 1. 備份到歷史紀錄區
-                    upload_or_update_gdrive_file(ID_PRICE_SUMMARY_FOLDER, backup_filename, out_buf.getvalue())
+                    #upload_or_update_gdrive_file(ID_PRICE_SUMMARY_FOLDER, backup_filename, out_buf.getvalue())
                     # 2. 覆寫同步最新版主表
-                    upload_or_update_gdrive_file(ID_PRICE_SUMMARY_FOLDER, "商品蝦皮麗嬰價格統整表.xlsx", out_buf.getvalue(), existing_file_id=ID_PRICE_SUMMARY)
+                    #upload_or_update_gdrive_file(ID_PRICE_SUMMARY_FOLDER, "商品蝦皮麗嬰價格統整表.xlsx", out_buf.getvalue(), existing_file_id=ID_PRICE_SUMMARY)
                     
                     st.session_state['pq_result'] = df_final.drop(columns=["iSKU"], errors="ignore")
                     st.success(f"🎉 商品蝦皮麗嬰整合完成！已成功儲存至雲端硬碟：{backup_filename}")
@@ -714,11 +714,11 @@ elif sub_page == "📈 蝦皮商品清單轉換":
                     df_gtin_keep = df_gtin_check[~df_gtin_check['GTIN_str'].isin(["", "00", "0", "nan"])].sort_values(by=['GTIN_str', '價格', 'original_index']).drop_duplicates(subset=['GTIN_str'], keep='last')
                     df_final_clean = pd.concat([df_gtin_keep, df_gtin_check[df_gtin_check['GTIN_str'].isin(["", "00", "0", "nan"])]]).sort_values(by='original_index')
                     
-                    timestamp_sp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                    backup_sp_filename = f"蝦皮清洗備份_{timestamp_sp}.xlsx"
+                    #timestamp_sp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    #backup_sp_filename = f"蝦皮清洗備份_{timestamp_sp}.xlsx"
                     
-                    out_buf_sp = io.BytesIO()
-                    df_final_clean.to_excel(out_buf_sp, index=False)
+                    #out_buf_sp = io.BytesIO()
+                    #df_final_clean.to_excel(out_buf_sp, index=False)
                     
                     # 儲存與備份至雲端空間
                     upload_or_update_gdrive_file(ID_SHOPEE_FOLDER, backup_sp_filename, out_buf_sp.getvalue())
@@ -870,7 +870,7 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
         with pd.ExcelWriter(towrite_inward, engine='openpyxl') as writer:
             edited_inward_df.to_excel(writer, index=False, sheet_name="SiteGiant入庫單")
             
-        final_filename = f"sitegiant採購入庫單_{vendor_name}_{order_no}.xlsx"
+       # final_filename = f"sitegiant採購入庫單_{vendor_name}_{order_no}.xlsx"
         
         # 直接上傳備份至雲端『歷史入庫單』空間
         upload_or_update_gdrive_file(ID_HISTORY_INWARD_FOLDER, final_filename, towrite_inward.getvalue())
