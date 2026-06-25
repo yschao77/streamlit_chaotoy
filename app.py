@@ -450,7 +450,7 @@ elif sub_page == "🧠 PowerQuery 執行三表整合":
                     #upload_or_update_gdrive_file(ID_PRICE_SUMMARY_FOLDER, "商品蝦皮麗嬰價格統整表.xlsx", out_buf.getvalue(), existing_file_id=ID_PRICE_SUMMARY)
                     
                     st.session_state['pq_result'] = df_final.drop(columns=["iSKU"], errors="ignore")
-                    st.success(f"🎉 商品蝦皮麗嬰整合完成！已成功儲存至雲端硬碟：{backup_filename}")
+                    #st.success(f"🎉 商品蝦皮麗嬰整合完成！已成功儲存至雲端硬碟：{backup_filename}")
                 except Exception as e:
                     st.error(f"❌ 錯誤: {str(e)}")
 
