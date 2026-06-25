@@ -40,6 +40,15 @@ try:
     openpyxl.descriptors.base.Set.__set__ = patched_set_attr
 except Exception:
     pass
+    
+# =========================================================================
+# 🛠️ check python-calamine
+# =========================================================================
+try:
+    import calamine
+    HAS_CALAMINE = True
+except ImportError:
+    HAS_CALAMINE = False
 
 # =========================================================================
 # 🌐 1. Google Drive 雲端資料夾 ID 定義與權限初始化
@@ -352,7 +361,7 @@ if sub_page == "📊 PowerQuery 三表整合歷史紀錄":
                 target_id = file_options[selected_pq_file]
                 file_bytes = download_gdrive_file_to_bytes(target_id)
                 # 優化：純讀取歷史紀錄，嘗試使用 calamine 加速
-                df_pq_view = pd.read_excel(file_bytes, engine="calamine" if "calamine" in pd.options.io.excel.engines else None)
+                df_pq_view = pd.read_excel(file_bytes, engine="calamine" if HAS_CALAMINE else None)
                 st.markdown(f"📄 **目前調閱雲端檔案**：`{selected_pq_file}` ｜ 📊 **資料總項數**：`{len(df_pq_view)} 筆`")
                 st.dataframe(df_pq_view, use_container_width=True)
                 st.download_button(label="🔄 重新下載此歷史整合表 (.xlsx)", data=file_bytes.getvalue(), file_name=selected_pq_file, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
@@ -385,7 +394,7 @@ elif sub_page == "🧠 PowerQuery 執行三表整合":
             with st.spinner("正在由雲端載入數據流並進行大數據跨表計算..."):
                 try:
                     # 優化：跨表巨量讀取，指定使用 calamine 引擎大幅加速
-                    engine_kw = {"engine": "calamine"} if "calamine" in pd.options.io.excel.engines else {}
+                    engine_kw = {"engine": "calamine"} if HAS_CALAMINE else {}
                     df_liying = pd.read_excel(download_gdrive_file_to_bytes(ID_MASTER_FILE), sheet_name="麗嬰國際產品總表", **engine_kw)
                     df_p = pd.read_excel(download_gdrive_file_to_bytes(ID_LOCAL_PROD), sheet_name="商品iSKU清單", **engine_kw)
                     df_s = pd.read_excel(download_gdrive_file_to_bytes(ID_SHOPEE_MASTER), sheet_name="蝦皮商品列表", **engine_kw)
@@ -436,7 +445,7 @@ elif sub_page == "🔍 麗嬰商品總表數據查詢":
         
         try:
             # 優化：使用 calamine 快速讀取預覽
-            engine_kw = {"engine": "calamine"} if "calamine" in pd.options.io.excel.engines else {}
+            engine_kw = {"engine": "calamine"} if HAS_CALAMINE else {}
             df_view = pd.read_excel(download_gdrive_file_to_bytes(ID_MASTER_FILE), selected_sheet, **engine_kw)
             if selected_sheet == "麗嬰國際產品總表" and "條碼" in df_view.columns:
                 df_view['條碼'] = df_view['條碼'].astype(str).str.strip().str.split('.').str[0]
@@ -719,7 +728,7 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
         else:
             try:
                 if ID_PRICE_SUMMARY:
-                    engine_kw = {"engine": "calamine"} if "calamine" in pd.options.io.excel.engines else {}
+                    engine_kw = {"engine": "calamine"} if HAS_CALAMINE else {}
                     df_ref = pd.read_excel(download_gdrive_file_to_bytes(ID_PRICE_SUMMARY), **engine_kw)
                     df_ref['c_clean'] = df_ref['c'].astype(str).str.strip().str.split('.').str[0]
                         
@@ -795,7 +804,7 @@ elif sub_page == "📜 sitegiant 歷史入庫單紀錄":
             try:
                 target_id = file_options[selected_hist_file]
                 file_bytes = download_gdrive_file_to_bytes(target_id)
-                df_hist_view = pd.read_excel(file_bytes, engine="calamine" if "calamine" in pd.options.io.excel.engines else None)
+                df_hist_view = pd.read_excel(file_bytes, engine="calamine" if HAS_CALAMINE else None)
                 st.markdown(f"📄 **當前雲端檔案**：`{selected_hist_file}` ｜ 📊 **單據品項數**：`{len(df_hist_view)} 筆`")
                 st.dataframe(df_hist_view, use_container_width=True)
                 st.download_button(label="🔄 下載此歷史採購入庫單", data=file_bytes.getvalue(), file_name=selected_hist_file, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
@@ -815,7 +824,7 @@ elif sub_page == "🔍 商品清單紀錄查詢":
             try:
                 target_id = file_options[selected_hist_file]
                 file_bytes = download_gdrive_file_to_bytes(target_id)
-                df_hist_view = pd.read_excel(file_bytes, engine="calamine" if "calamine" in pd.options.io.excel.engines else None)
+                df_hist_view = pd.read_excel(file_bytes, engine="calamine" if HAS_CALAMINE else None)
                 st.markdown(f"📄 **當前雲端檔案**：`{selected_hist_file}` ｜ 📊 **iSKU品項數**：`{len(df_hist_view)} 筆`")
                 st.dataframe(df_hist_view, use_container_width=True)
                 st.download_button(label="🔄 下載此歷史商品清單", data=file_bytes.getvalue(), file_name=selected_hist_file, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
