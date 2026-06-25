@@ -346,6 +346,9 @@ if sub_page == "📊 PowerQuery 三表整合歷史紀錄":
     else:
         file_options = {f['name']: f['id'] for f in hist_pq_files}
         selected_pq_file = st.selectbox("🎯 請選擇欲調閱的歷史整合報告：", list(file_options.keys()))
+
+        is_installed = "calamine" in pd.options.io.excel.engines.read
+        printf(f"Is calamine registerd? {is_installed}")
         
         if selected_pq_file:
             try:
