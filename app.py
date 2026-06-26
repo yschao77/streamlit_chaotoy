@@ -444,7 +444,7 @@ elif sub_page == "🔍 麗嬰商品總表數據查詢":
         selected_sheet = st.selectbox("請選擇數據分頁：", view_sheets)
         
         # ── 🌟 新增功能：切換查詢模式 ──
-        search_mode = st.radio("🎯 請選擇查詢模式：", ["模糊關鍵字搜尋", "多筆條碼批次精準查詢"], horizontal=True)
+        search_mode = st.radio("🎯 請選擇查詢模式：", ["多筆條碼價格查詢", "模糊關鍵字搜尋"], horizontal=True)
         
         try:
             # 使用 calamine 快速讀取預覽
@@ -466,8 +466,8 @@ elif sub_page == "🔍 麗嬰商品總表數據查詢":
                 else:
                     st.dataframe(df_view, use_container_width=True)
             
-            # ── 模式 2：🚀 全新功能 - 多筆條碼批次精準查詢 ──
-            elif search_mode == "多筆條碼批次精準查詢":
+            # ── 模式 2：🚀 全新功能 - 多筆條碼價格查詢 ──
+            elif search_mode == "多筆條碼價格查詢":
                 if "條碼" not in df_view.columns:
                     st.warning(f"⚠️ 當前選擇的分頁 【{selected_sheet}】 內部不含「條碼」欄位，無法使用此查詢模式。")
                 else:
