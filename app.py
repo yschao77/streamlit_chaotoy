@@ -431,32 +431,90 @@ elif sub_page == "🧠 PowerQuery 執行三表整合":
         st.download_button(label="📥 匯出此三表整合交叉比對表 (.xlsx)", data=towrite_pq.getvalue(), file_name=f"三表整合比對結果_{datetime.date.today().strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # -------------------------------------------------------------------------
-# 子功能 3：🔍 麗嬰商品總表數據查詢
+# 子功能 3：🔍 麗嬰商品總表數據查詢 (新增多筆條碼批次查詢功能)
 # -------------------------------------------------------------------------
 elif sub_page == "🔍 麗嬰商品總表數據查詢":
     st.subheader("📋 麗嬰採購產品總表資料庫分頁動態檢視")
     
-    # 優化：延遲載入 metadata，避免全域耗能
+    # 延遲載入 metadata，避免全域耗能
     _, _, _, _, all_sheets, _ = load_master_data(ID_MASTER_FILE)
+    
     if all_sheets:
         view_sheets = [s for s in all_sheets if s != "麗嬰產品新採購單"]
         selected_sheet = st.selectbox("請選擇數據分頁：", view_sheets)
-        search_term = st.text_input("🔍 快速搜尋關鍵字 (支援條碼、品名、貨號模糊比對)：", placeholder="輸入搜尋內容...")
+        
+        # ── 🌟 新增功能：切換查詢模式 ──
+        search_mode = st.radio("🎯 請選擇查詢模式：", ["模糊關鍵字搜尋", "多筆條碼批次精準查詢"], horizontal=True)
         
         try:
-            # 優化：使用 calamine 快速讀取預覽
+            # 使用 calamine 快速讀取預覽
             engine_kw = {"engine": "calamine"} if HAS_CALAMINE else {}
             df_view = pd.read_excel(download_gdrive_file_to_bytes(ID_MASTER_FILE), selected_sheet, **engine_kw)
-            if selected_sheet == "麗嬰國際產品總表" and "條碼" in df_view.columns:
-                df_view['條碼'] = df_view['條碼'].astype(str).str.strip().str.split('.').str[0]
-                
-            st.metric(label=f"📊 【{selected_sheet}】當前總資料筆數", value=f"{len(df_view)} 筆")
             
-            if search_term:
-                search_mask = df_view.astype(str).apply(lambda x: x.str.contains(search_term, case=False, na=False)).any(axis=1)
-                st.dataframe(df_view[search_mask], use_container_width=True)
-            else:
-                st.dataframe(df_view, use_container_width=True)
+            # 確保條碼欄位格式乾淨（去除小數點與空白）
+            if "條碼" in df_view.columns:
+                df_view['條碼'] = df_view['條碼'].astype(str).str.strip().str.split('.').str[0]
+            
+            # ── 模式 1：原本的模糊關鍵字搜尋 ──
+            if search_mode == "模糊關鍵字搜尋":
+                search_term = st.text_input("🔍 快速搜尋關鍵字 (支援條碼、品名、貨號模糊比對)：", placeholder="輸入搜尋內容...")
+                st.metric(label=f"📊 【{selected_sheet}】當前總資料筆數", value=f"{len(df_view)} 筆")
+                
+                if search_term:
+                    search_mask = df_view.astype(str).apply(lambda x: x.str.contains(search_term, case=False, na=False)).any(axis=1)
+                    st.dataframe(df_view[search_mask], use_container_width=True)
+                else:
+                    st.dataframe(df_view, use_container_width=True)
+            
+            # ── 模式 2：🚀 全新功能 - 多筆條碼批次精準查詢 ──
+            elif search_mode == "多筆條碼批次精準查詢":
+                if "條碼" not in df_view.columns:
+                    st.warning(f"⚠️ 當前選擇的分頁 【{selected_sheet}】 內部不含「條碼」欄位，無法使用此查詢模式。")
+                else:
+                    barcode_paste = st.text_area(
+                        "📋 請貼上多筆國際條碼 (支援從 Excel 複製直接貼上，或以換行、空格、逗號隔開)：",
+                        height=120,
+                        placeholder="範例：\n4711234567890\n4711234567891"
+                    )
+                    
+                    if barcode_paste.strip():
+                        # 解析使用者輸入的條碼列表（清洗空白、換行、逗號）
+                        raw_barcodes = barcode_paste.replace(',', ' ').replace('\t', ' ').split()
+                        cleaned_barcodes = [str(b).strip().split('.')[0] for b in raw_barcodes if b.strip()]
+                        
+                        if cleaned_barcodes:
+                            # 使用 Pandas isin 進行高效比對
+                            df_result = df_view[df_view['條碼'].isin(cleaned_barcodes)].copy()
+                            
+                            # 動態回報搜尋統計
+                            found_count = len(df_result)
+                            input_count = len(set(cleaned_barcodes)) # 去重後的輸入條碼數
+                            
+                            st.success(f"🔍 查詢完畢！您輸入了 {input_count} 筆不重複條碼，成功比對出 {found_count} 筆商品資料。")
+                            
+                            # 挑選核心售價相關欄位置前顯示（如果欄位存在的話）
+                            important_cols = ["條碼", "名稱", "零售價", "含稅"]
+                            display_cols = [c for c in important_cols if c in df_result.columns] + \
+                                           [c for c in df_result.columns if c not in important_cols]
+                            
+                            st.dataframe(df_result[display_cols], use_container_width=True)
+                            
+                            # 提供獨立的查詢結果下載按鈕
+                            towrite_query = io.BytesIO()
+                            with pd.ExcelWriter(towrite_query, engine='openpyxl') as writer:
+                                df_result[display_cols].to_excel(writer, index=False, sheet_name="條碼查詢結果")
+                            
+                            st.download_button(
+                                label="📥 下載本次條碼查詢結果報表 (.xlsx)",
+                                data=towrite_query.getvalue(),
+                                file_name=f"條碼批次查詢結果_{datetime.date.today().strftime('%Y%m%d')}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            )
+                        else:
+                            st.info("💡 請輸入有效的條碼。")
+                    else:
+                        st.info("💡 請在上方文字方塊中貼上欲查詢的條碼。")
+                        
         except Exception as e:
             st.error(f"❌ 讀取分頁數據失敗: {str(e)}")
 
