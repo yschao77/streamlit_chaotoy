@@ -743,43 +743,43 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
                     df_ref = pd.read_excel(download_gdrive_file_to_bytes(ID_PRICE_SUMMARY), **engine_kw)
                     df_ref['c_clean'] = df_ref['c'].astype(str).str.strip().str.split('.').str[0]
                         
-                result_rows = []
-                for row in input_df.itertuples(index=False):
-                    barcode_input = str(row.國際條碼).strip().split('.')[0] if pd.notna(row.國際條碼) else ""
-                    if barcode_input in ["", "0", "nan", "None"]: continue
-                    qty = int(row.數量) if pd.notna(row.數量) else 0
+                    result_rows = []
+                    for row in input_df.itertuples(index=False):
+                        barcode_input = str(row.國際條碼).strip().split('.')[0] if pd.notna(row.國際條碼) else ""
+                        if barcode_input in ["", "0", "nan", "None"]: continue
+                            qty = int(row.數量) if pd.notna(row.數量) else 0
                     
-                    sku_final = "⚠️ 提示：須新增iSKU"
-                    prod_name = "請確認商品列表和統整表是否已經更新"
-                    category = ""
-                    keywords = ""
-                    # ── ⚙️ 核心邏輯：預設為 None，讓畫面呈現乾淨空白 ──
-                    cost_val = None 
-                    tax_val = None
+                            sku_final = "⚠️ 提示：須新增iSKU"
+                            prod_name = "請確認商品列表和統整表是否已經更新"
+                            category = ""
+                            keywords = ""
+                            # ── ⚙️ 核心邏輯：預設為 None，讓畫面呈現乾淨空白 ──
+                            cost_val = None 
+                            tax_val = None
                     
-                    if not df_ref.empty and 'c_clean' in df_ref.columns:
-                        match = df_ref[df_ref['c_clean'] == barcode_input]
-                        if not match.empty:
-                            match_row = match.iloc[0]
-                            prod_name = match_row.get('品名', match_row.get('名稱', ''))
-                            sku = match_row.get('自定義編碼', '')
-                            sku_final = sku if pd.notna(sku) and str(sku).strip() != "" else "⚠️ 提示：須新增iSKU"
-                            category = match_row.get('分類定義', '')
-                            keywords = match_row.get('產品關鍵字', '')
+                        if not df_ref.empty and 'c_clean' in df_ref.columns:
+                            match = df_ref[df_ref['c_clean'] == barcode_input]
+                            if not match.empty:
+                                match_row = match.iloc[0]
+                                prod_name = match_row.get('品名', match_row.get('名稱', ''))
+                                sku = match_row.get('自定義編碼', '')
+                                sku_final = sku if pd.notna(sku) and str(sku).strip() != "" else "⚠️ 提示：須新增iSKU"
+                                category = match_row.get('分類定義', '')
+                                keywords = match_row.get('產品關鍵字', '')
                             
-                            # ── ⚙️ 廠商判定邏輯：只有麗嬰才從總表抓成本與稅款，其餘維持 None ──
-                            if vendor_name == "麗嬰":
-                                c_raw = match_row.get('麗嬰未稅價', None)
-                                t_raw = match_row.get('麗嬰稅款', None)
-                                cost_val = float(c_raw) if pd.notna(c_raw) else None
-                                tax_val = float(t_raw) if pd.notna(t_raw) else None
+                                # ── ⚙️ 廠商判定邏輯：只有麗嬰才從總表抓成本與稅款，其餘維持 None ──
+                                if vendor_name == "麗嬰":
+                                    c_raw = match_row.get('麗嬰未稅價', None)
+                                    t_raw = match_row.get('麗嬰稅款', None)
+                                    cost_val = float(c_raw) if pd.notna(c_raw) else None
+                                    tax_val = float(t_raw) if pd.notna(t_raw) else None
 
-                    result_rows.append({
-                        "收貨日": str(recv_date), "國際條碼": barcode_input,
-                        "庫存SKU": sku_final, "庫存貨品名稱": prod_name, 
-                        "成本": cost_val, "稅款": tax_val, "數量": qty,
-                        "分類定義": category, "產品關鍵字": keywords
-                    })                    
+                        result_rows.append({
+                            "收貨日": str(recv_date), "國際條碼": barcode_input,
+                            "庫存SKU": sku_final, "庫存貨品名稱": prod_name, 
+                            "成本": cost_val, "稅款": tax_val, "數量": qty,
+                            "分類定義": category, "產品關鍵字": keywords
+                        })                    
                 else:
                     st.error("❌ 雲端找不到『商品蝦皮麗嬰價格統整表』。")
                     
