@@ -747,9 +747,9 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
             st.error("❌ 轉換失敗！請填入銷貨單號與有效明細。")
         else:
             try:
-                if ID_PRICE_SUMMARY:
+                if check_summary_ok:
                     engine_kw = {"engine": "calamine"} if HAS_CALAMINE else {}
-                    df_ref = pd.read_excel(download_gdrive_file_to_bytes(ID_PRICE_SUMMARY), **engine_kw)
+                    df_ref = pd.read_excel(download_gdrive_file_to_bytes(check_summary_ok), **engine_kw)
                     df_ref['c_clean'] = df_ref['c'].astype(str).str.strip().str.split('.').str[0]
                         
                 result_rows = []
