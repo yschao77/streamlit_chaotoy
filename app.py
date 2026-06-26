@@ -702,6 +702,7 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
             st.success(f"🟢 已經與[商品蝦皮麗嬰價格統整表]建立連線 (最後更新：{format_gdrive_time(TIME_SUMMARY_REF)})")
         else:
             st.error(f"❌ 請先前往執行『🧠 PowerQuery 三表整合』以產生價格統整主核心。")
+    except Exception as e: st.error(f"❌ 讀取失敗: {str(e)}")
     
     c_meta1, c_meta2 = st.columns(2)
     with c_meta1: 
