@@ -695,13 +695,13 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
     st.subheader("🛍️ SiteGiant 採購入庫單內容填寫")
     
     try:
-        check_summary_ok = get_cached_gdrive_id(ID_PRICE_SUMMARY_FOLDER, "商品蝦皮麗嬰價格統整表")
-        if check_summary_ok:
-            st.success(f"🟢 已經與[商品蝦皮麗嬰價格統整表]建立連線")
+        # ── ⚙️ 修正：正確解包並獲取統整表的雲端檔案 ID ──
+        ID_SUMMARY_REF, TIME_SUMMARY_REF, NAME_SUMMARY_REF = get_cached_gdrive_id(ID_PRICE_SUMMARY_FOLDER, "商品蝦皮麗嬰價格統整表")
+    
+        if ID_SUMMARY_REF:
+            st.success(f"🟢 已經與[商品蝦皮麗嬰價格統整表]建立連線 (最後更新：{format_gdrive_time(TIME_SUMMARY_REF)})")
         else:
             st.error(f"❌ 請先前往執行『🧠 PowerQuery 三表整合』以產生價格統整主核心。")
-    except:
-        check_summary_ok = True # 雲端備用略過    
     
     c_meta1, c_meta2 = st.columns(2)
     with c_meta1: 
@@ -747,9 +747,9 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
             st.error("❌ 轉換失敗！請填入銷貨單號與有效明細。")
         else:
             try:
-                if check_summary_ok:
+                if ID_SUMMARY_REF:
                     engine_kw = {"engine": "calamine"} if HAS_CALAMINE else {}
-                    df_ref = pd.read_excel(download_gdrive_file_to_bytes(check_summary_ok), **engine_kw)
+                    df_ref = pd.read_excel(download_gdrive_file_to_bytes(ID_SUMMARY_REF), **engine_kw)
                     df_ref['c_clean'] = df_ref['c'].astype(str).str.strip().str.split('.').str[0]
                         
                 result_rows = []
@@ -862,7 +862,7 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
             
         final_filename = f"sitegiant採購入庫單_{current_vendor}_{current_order}.xlsx"
 
-        # upload_or_update_gdrive_file(ID_HISTORY_INWARD_FOLDER, final_filename, towrite_inward.getvalue()) #gmail免費帳號無法新建檔案 先remark, 如果有workspace空間再說
+        upload_or_update_gdrive_file(ID_HISTORY_INWARD_FOLDER, final_filename, towrite_inward.getvalue())
         st.download_button(label=f"📥 下載sitegiant格式採購入庫單 ({final_filename})", data=towrite_inward.getvalue(), file_name=final_filename, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
 
 # -------------------------------------------------------------------------
