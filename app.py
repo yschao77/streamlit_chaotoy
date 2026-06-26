@@ -798,7 +798,7 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
         current_vendor = st.session_state.get('current_vendor_name', '未命名廠商')
         current_order = st.session_state.get('current_order_no', '0000')
         
-        target_columns = ["庫存SKU", "庫存貨品名稱", "成本", "稅款", "數量"]
+        target_columns = ["國際條碼","庫存SKU", "庫存貨品名稱", "成本", "稅款", "數量"]
         available_cols = [col for col in target_columns if col in res_df.columns]
         df_download = res_df[available_cols].copy()
         
@@ -808,7 +808,7 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
         edited_inward_df = st.data_editor(
             df_download,
             use_container_width=True,
-            disabled=["庫存SKU", "庫存貨品名稱", "數量"],
+            disabled=["國際條碼","庫存SKU", "庫存貨品名稱", "數量"],
             column_config={
                 "成本": st.column_config.NumberColumn(
                     "成本", help="請手動輸入未稅成本", min_value=0.0, format="%.2f"
