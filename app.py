@@ -318,7 +318,7 @@ st.sidebar.write("---")
 
 main_module = st.sidebar.selectbox(
     "🎯 請選擇核心管理模組：",
-    ["📦 商品蝦皮麗嬰統整管理", "🏪 sitegiant 電商整合管理"]
+    ["🏪 sitegiant 電商整合管理", "📦 商品蝦皮麗嬰統整管理"]
 )
 st.sidebar.write("") 
 
@@ -694,14 +694,33 @@ elif sub_page == "📈 蝦皮商品清單轉換":
 elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
     st.subheader("🛍️ SiteGiant 採購入庫單內容填寫")
     
+    try:
+        check_summary_ok = get_cached_gdrive_id(ID_PRICE_SUMMARY_FOLDER, "商品蝦皮麗嬰價格統整表")
+        if check_summary_ok:
+            st.success(f"🟢 已經與[商品蝦皮麗嬰價格統整表]建立連線")
+        else:
+            st.error(f"❌ 請先前往執行『🧠 PowerQuery 三表整合』以產生價格統整主核心。")
+    except:
+        check_summary_ok = True # 雲端備用略過    
+    
     c_meta1, c_meta2 = st.columns(2)
     with c_meta1: 
         order_no = st.text_input("📝 請輸入訂單/銷貨單號：", value=datetime.date.today().strftime("%Y%m%d01"))
-        vendor_name = st.selectbox("🏬 請選擇廠商清單：", ["麗嬰", "buyee", "日亞"])
+        vendor_options = ["麗嬰", "Buyee", "日亞", "其他"]
+        selected_vendor = st.selectbox("🏬 請選擇採購廠商：", vendor_options, key="sg_vendor_selectbox")
+        
+        if selected_vendor == "其他":
+            custom_vendor = st.text_input("✍️ 請輸入自訂廠商名稱：", key="sg_custom_vendor_name")
+            vendor_name = custom_vendor if custom_vendor.strip() else "其他廠商"
+        else:
+            vendor_name = selected_vendor
+
     with c_meta2:
         recv_date = st.date_input("📅 選擇收貨日：", value=datetime.date.today())
         
-    bulk_paste_area = st.text_area("🚀 條碼與數量批次快速貼上 (Tab或空白鍵隔開)：", height=120, placeholder="條碼 數量")
+    st.write("---")
+    st.subheader("🚀 條碼與數量批次快速貼上")
+    bulk_paste_area = st.text_area("請從excel複製條碼、數量 (Tab鍵或空白鍵隔開)：", height=120, placeholder="條碼 數量")
     
     if bulk_paste_area.strip():
         lines = [line.strip() for line in bulk_paste_area.strip().split('\n') if line.strip()]
@@ -719,6 +738,7 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
             st.session_state['inward_input_df'] = pd.DataFrame(parsed_rows)
             st.toast("重新載入成功！已同步填入下方明細表格。", icon="🚀")
 
+    st.write("---")
     input_df = st.data_editor(st.session_state['inward_input_df'], num_rows="dynamic", use_container_width=True, key="inward_grid")
     st.session_state['inward_input_df'] = input_df 
     
@@ -732,61 +752,116 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
                     df_ref = pd.read_excel(download_gdrive_file_to_bytes(ID_PRICE_SUMMARY), **engine_kw)
                     df_ref['c_clean'] = df_ref['c'].astype(str).str.strip().str.split('.').str[0]
                         
-                    result_rows = []
-                    for row in input_df.itertuples(index=False):
-                        barcode_input = str(row.國際條碼).strip().split('.')[0] if pd.notna(row.國際條碼) else ""
-                        if barcode_input in ["", "0", "nan", "None"]: continue
-                        qty = int(row.數量) if pd.notna(row.數量) else 0
-                        
+                result_rows = []
+                for row in input_df.itertuples(index=False):
+                    barcode_input = str(row.國際條碼).strip().split('.')[0] if pd.notna(row.國際條碼) else ""
+                    if barcode_input in ["", "0", "nan", "None"]: continue
+                    qty = int(row.數量) if pd.notna(row.數量) else 0
+                    
+                    sku_final = "⚠️ 提示：須新增iSKU"
+                    prod_name = "請確認商品列表和統整表是否已經更新"
+                    category = ""
+                    keywords = ""
+                    # ── ⚙️ 核心邏輯：預設為 None，讓畫面呈現乾淨空白 ──
+                    cost_val = None 
+                    tax_val = None
+                    
+                    if not df_ref.empty and 'c_clean' in df_ref.columns:
                         match = df_ref[df_ref['c_clean'] == barcode_input]
                         if not match.empty:
                             match_row = match.iloc[0]
-                            result_rows.append({
-                                "收貨日": str(recv_date), "國際條碼": barcode_input,
-                                "庫存SKU": "⚠️ 提示：須新增iSKU" if pd.isna(match_row.get('自定義編碼', '')) else match_row.get('自定義編碼', ''), 
-                                "庫存貨品名稱": match_row.get('品名', match_row.get('名稱', '')), 
-                                "成本": "⚠️ 提示：手動輸入" if pd.isna(match_row.get('麗嬰未稅價', 0)) else match_row.get('麗嬰未稅價', 0), 
-                                "稅款": "⚠️ 提示：手動輸入" if pd.isna(match_row.get('麗嬰稅款', 0)) else match_row.get('麗嬰稅款', 0), 
-                                "數量": qty, "分類定義": match_row.get('分類定義', ''), "產品關鍵字": match_row.get('產品關鍵字', '')
-                            })
-                        else:
-                            result_rows.append({"收貨日": str(recv_date), "國際條碼": barcode_input, "庫存SKU": "⚠️ 提示：須新增iSKU", "庫存貨品名稱": "請至麗嬰總表補入此新商品", "成本": "⚠️ 提示：手動輸入", "稅款": "⚠️ 提示：手動輸入", "數量": qty, "分類定義": "", "產品關鍵字": ""})
+                            prod_name = match_row.get('品名', match_row.get('名稱', ''))
+                            sku = match_row.get('自定義編碼', '')
+                            sku_final = sku if pd.notna(sku) and str(sku).strip() != "" else "⚠️ 提示：須新增iSKU"
+                            category = match_row.get('分類定義', '')
+                            keywords = match_row.get('產品關鍵字', '')
                             
-                    if result_rows:
-                        st.session_state['inward_result_df'] = pd.DataFrame(result_rows)
-                        st.success(f"🚀 SiteGiant 採購入庫單格式所需資料完成！")
+                            # ── ⚙️ 廠商判定邏輯：只有麗嬰才從總表抓成本與稅款，其餘維持 None ──
+                            if vendor_name == "麗嬰":
+                                c_raw = match_row.get('麗嬰未稅價', None)
+                                t_raw = match_row.get('麗嬰稅款', None)
+                                cost_val = float(c_raw) if pd.notna(c_raw) else None
+                                tax_val = float(t_raw) if pd.notna(t_raw) else None
+
+                    result_rows.append({
+                        "收貨日": str(recv_date), "國際條碼": barcode_input,
+                        "庫存SKU": sku_final, "庫存貨品名稱": prod_name, 
+                        "成本": cost_val, "稅款": tax_val, "數量": qty,
+                        "分類定義": category, "產品關鍵字": keywords
+                    })                    
                 else:
                     st.error("❌ 雲端找不到『商品蝦皮麗嬰價格統整表』。")
+                    
+                if result_rows:
+                    st.session_state['inward_result_df'] = pd.DataFrame(result_rows)
+                    st.session_state['current_vendor_name'] = vendor_name
+                    st.session_state['current_order_no'] = order_no
+                    st.success(f"🚀 格式勾稽完成！廠商已設定為：【{vendor_name}】")
+                
             except Exception as e: 
                 st.error(f"❌ 錯誤: {str(e)}")
 
+    # ── 📝 步驟 2：表格即時可編輯渲染與動態加總區塊 ──
     if 'inward_result_df' in st.session_state:
         res_df = st.session_state['inward_result_df']
-        df_download = res_df[["庫存SKU", "庫存貨品名稱", "成本", "稅款", "數量"]].copy()
+        current_vendor = st.session_state.get('current_vendor_name', '未命名廠商')
+        current_order = st.session_state.get('current_order_no', '0000')
         
-        for col in ["成本", "稅款"]: df_download[col] = pd.to_numeric(df_download[col], errors='coerce').fillna(0.0)
+        target_columns = ["庫存SKU", "庫存貨品名稱", "成本", "稅款", "數量"]
+        available_cols = [col for col in target_columns if col in res_df.columns]
+        df_download = res_df[available_cols].copy()
         
-        st.markdown("📋 **入庫明細編輯與預覽（請雙擊「成本」或「稅款」直接修改數字）：**")
+        st.markdown(f"📋 **【{current_vendor}】入庫明細編輯與預覽（請雙擊「成本」或「稅款」直接修改數字）：**")
+        
+        # 使用 data_editor 渲染，強制定義為純數值欄位（允許 None 留白編輯）
         edited_inward_df = st.data_editor(
-            df_download, use_container_width=True, disabled=["庫存SKU", "庫存貨品名稱", "數量"],  
+            df_download,
+            use_container_width=True,
+            disabled=["庫存SKU", "庫存貨品名稱", "數量"],
             column_config={
-                "成本": st.column_config.NumberColumn("成本", format="$ %.2f"),
-                "稅款": st.column_config.NumberColumn("稅款", format="$ %.2f"),
-            }, key="inward_items_editor_v2"
+                "成本": st.column_config.NumberColumn(
+                    "成本", help="請手動輸入未稅成本", min_value=0.0, format="%.2f"
+                ),
+                "稅款": st.column_config.NumberColumn(
+                    "稅款", help="請手動輸入營業稅款", min_value=0.0, format="%.2f"
+                ),
+            },
+            key="inward_items_editor_final"
         )
         
-        h_cost = sum(float(r.成本) * int(r.數量) for r in edited_inward_df.itertuples(index=False) if pd.notna(r.數量))
-        h_tax = sum(float(r.稅款) * int(r.數量) for r in edited_inward_df.itertuples(index=False) if pd.notna(r.數量))
-        
-        c_tot1, c_tot2 = st.columns(2)
-        with c_tot1: st.metric(label="💰 單據成本未稅總額", value=f"$ {h_cost:,.2f} 元")
-        with c_tot2: st.metric(label="🧾 單據營業稅總額", value=f"$ {h_tax:,.2f} 元")
+        # ── 📊 步驟 3：【核心動態即時加總】防呆過濾 None 值 ──
+        h_cost = 0.0
+        h_tax = 0.0
+        for h_row in edited_inward_df.itertuples(index=False):
+            h_qty = int(h_row.數量) if (hasattr(h_row, '數量') and pd.notna(h_row.數量)) else 0
             
+            # 動態累加成本 (成本 * 數量)
+            if hasattr(h_row, '成本') and pd.notna(h_row.成本):
+                try: h_cost += float(h_row.成本) * h_qty
+                except: pass
+                
+            # 動態累加稅款 (稅款 * 數量)
+            if hasattr(h_row, '稅款') and pd.notna(h_row.稅款):
+                try: h_tax += float(h_row.稅款) * h_qty
+                except: pass
+        
+        # ── 🖥️ 步驟 4：動態渲染金額看板 ──
+        st.write("---")
+        st.markdown("#### 📊 本張單據入庫成本稅款即時統計看板 (隨手動輸入動態更新)")
+        c_tot1, c_tot2 = st.columns(2)
+        with c_tot1: 
+            st.metric(label="💰 當前單據成本未稅總金額 (成本 * 數量)", value=f"$ {h_cost:,.2f} 元")
+        with c_tot2: 
+            st.metric(label="🧾 當前單據營業稅總金額 (稅款 * 數量)", value=f"$ {h_tax:,.2f} 元")
+        st.write("---")
+        
+        # ── 💾 步驟 5：儲存與下載 ──
         towrite_inward = io.BytesIO()
         with pd.ExcelWriter(towrite_inward, engine='openpyxl') as writer:
             edited_inward_df.to_excel(writer, index=False, sheet_name="SiteGiant入庫單")
             
-        final_filename = f"sitegiant採購入庫單_{vendor_name}_{order_no}.xlsx"
+        final_filename = f"sitegiant採購入庫單_{current_vendor}_{current_order}.xlsx"
+
         upload_or_update_gdrive_file(ID_HISTORY_INWARD_FOLDER, final_filename, towrite_inward.getvalue())
         st.download_button(label=f"📥 下載sitegiant格式採購入庫單 ({final_filename})", data=towrite_inward.getvalue(), file_name=final_filename, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
 
@@ -807,6 +882,34 @@ elif sub_page == "📜 sitegiant 歷史入庫單紀錄":
                 df_hist_view = pd.read_excel(file_bytes, engine="calamine" if HAS_CALAMINE else None)
                 st.markdown(f"📄 **當前雲端檔案**：`{selected_hist_file}` ｜ 📊 **單據品項數**：`{len(df_hist_view)} 筆`")
                 st.dataframe(df_hist_view, use_container_width=True)
+                
+                h_cost = 0.0
+                h_tax = 0.0
+                for h_row in df_hist_view.itertuples(index=False):
+                    h_qty = int(h_row.數量) if (hasattr(h_row, '數量') and pd.notna(h_row.數量)) else 0
+                    
+                    # 動態累加成本：先確認欄位存在且不是 NaN (空白)，才進行加總
+                    if hasattr(h_row, '成本') and pd.notna(h_row.成本):
+                        try: 
+                            h_cost += float(h_row.成本) * h_qty
+                        except ValueError: 
+                            pass
+                            
+                    # 動態累加稅款：先確認欄位存在且不是 NaN (空白)，才進行加總
+                    if hasattr(h_row, '稅款') and pd.notna(h_row.稅款):
+                        try: 
+                            h_tax += float(h_row.稅款) * h_qty
+                        except ValueError: 
+                            pass
+                    
+                st.markdown("#### 📊 本張單據入庫成本稅款")
+                c_tot1, c_tot2 = st.columns(2)
+                with c_tot1: 
+                    st.metric(label="💰 成本未稅總金額 (成本 * 數量)", value=f"$ {h_cost:,.2f} 元")
+                with c_tot2: 
+                    st.metric(label="🧾 營業稅總金額 (稅款 * 數量)", value=f"$ {h_tax:,.2f} 元")    
+                
+                
                 st.download_button(label="🔄 下載此歷史採購入庫單", data=file_bytes.getvalue(), file_name=selected_hist_file, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             except Exception as e: st.error(f"❌ 讀取失敗: {str(e)}")
 
