@@ -747,15 +747,15 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
                     for row in input_df.itertuples(index=False):
                         barcode_input = str(row.國際條碼).strip().split('.')[0] if pd.notna(row.國際條碼) else ""
                         if barcode_input in ["", "0", "nan", "None"]: continue
-                            qty = int(row.數量) if pd.notna(row.數量) else 0
+                        qty = int(row.數量) if pd.notna(row.數量) else 0
                     
-                            sku_final = "⚠️ 提示：須新增iSKU"
-                            prod_name = "請確認商品列表和統整表是否已經更新"
-                            category = ""
-                            keywords = ""
-                            # ── ⚙️ 核心邏輯：預設為 None，讓畫面呈現乾淨空白 ──
-                            cost_val = None 
-                            tax_val = None
+                        sku_final = "⚠️ 提示：須新增iSKU"
+                        prod_name = "請確認商品列表和統整表是否已經更新"
+                        category = ""
+                        keywords = ""
+                        # ── ⚙️ 核心邏輯：預設為 None，讓畫面呈現乾淨空白 ──
+                        cost_val = None 
+                        tax_val = None
                     
                         if not df_ref.empty and 'c_clean' in df_ref.columns:
                             match = df_ref[df_ref['c_clean'] == barcode_input]
