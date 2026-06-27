@@ -369,7 +369,7 @@ if sub_page == "📊 PowerQuery 三表整合歷史紀錄":
                 st.error(f"❌ 讀取雲端備份檔案失敗: {str(e)}")
 
 # -------------------------------------------------------------------------
-# 子功能 2：🧠 PowerQuery 三表整合
+# 子功能 2：🧠 PowerQuery 三表整合 (加強下載報表與顯示雲端統整表最後修改時間)
 # -------------------------------------------------------------------------
 elif sub_page == "🧠 PowerQuery 執行三表整合":
     st.subheader("🔍 三表數據追蹤")
@@ -384,6 +384,17 @@ elif sub_page == "🧠 PowerQuery 執行三表整合":
     with c3:
         st.metric("🧸 麗嬰產品總表", "已對接" if ID_MASTER_FILE else "❌ 未偵測到")
         st.caption(f"📅 最後修改時間: \n`{format_gdrive_time(TIME_MASTER)}`")
+
+    st.write("---")
+
+    # 🌟 全新加入：在執行前先到雲端抓取「商品蝦皮麗嬰價格統整表」的目前狀態與最後修改時間
+    st.subheader("📊 雲端『商品蝦皮麗嬰價格統整表』當前狀態")
+    existing_summary_id, existing_summary_time, _ = get_cached_gdrive_id(ID_PRICE_SUMMARY_FOLDER, "商品蝦皮麗嬰價格統整表")
+    
+    if existing_summary_id:
+        st.info(f"🟢 雲端已存在統整表檔案 ｜ 📅 最後修改時間：`{format_gdrive_time(existing_summary_time)}`")
+    else:
+        st.warning("⚠️ 雲端目前尚未建立『商品蝦皮麗嬰價格統整表』，回寫時系統將會自動全新建立。")
 
     st.write("---")
 
@@ -417,18 +428,83 @@ elif sub_page == "🧠 PowerQuery 執行三表整合":
                     df_final["麗嬰未稅價"] = df_final["麗嬰批發含稅價"].apply(lambda x: round(x / 1.05) if pd.notna(x) else None)
                     df_final["麗嬰稅款"] = df_final.apply(lambda r: round(r["麗嬰批發含稅價"] - r["麗嬰未稅價"]) if (pd.notna(r["麗嬰批發含稅價"]) and pd.notna(r["麗嬰未稅價"])) else None, axis=1)
                     
+                    # 將結果存入 pq_result 機制
                     st.session_state['pq_result'] = df_final.drop(columns=["iSKU"], errors="ignore")
+                    st.success("🎉 三表 PowerQuery 交叉聯結與財務指標計算整合完成！")
                 except Exception as e:
                     st.error(f"❌ 錯誤: {str(e)}")
 
-    if 'pq_result' in st.session_state:
-        st.subheader("📋 整合聯結情報報表輸出預覽")
-        st.dataframe(st.session_state['pq_result'], use_container_width=True)
+    # ── 當有整合結果存在時，顯示報表預覽、本地下載功能、以及雲端回寫機制 ──
+    if 'pq_result' in st.session_state and st.session_state['pq_result'] is not None:
+        df_result = st.session_state['pq_result']
         
-        towrite_pq = io.BytesIO()
-        with pd.ExcelWriter(towrite_pq, engine='openpyxl') as writer:
-            st.session_state['pq_result'].to_excel(writer, index=False, sheet_name="PowerQuery三表整合")
-        st.download_button(label="📥 匯出此三表整合交叉比對表 (.xlsx)", data=towrite_pq.getvalue(), file_name=f"三表整合比對結果_{datetime.date.today().strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.subheader("📋 整合聯結情報報表輸出預覽")
+        st.markdown(f"📊 **目前整合結果資料總項數**：`{len(df_result)} 筆`")
+        st.dataframe(df_result, use_container_width=True)
+        
+        # 建立下載與回寫的功能按鈕排版 (左右雙欄對齊)
+        col_btn1, col_btn2 = st.columns(2)
+        
+        with col_btn1:
+            # ✨ 功能 1：下載整合報表到本機電腦
+            towrite_pq = io.BytesIO()
+            with pd.ExcelWriter(towrite_pq, engine='openpyxl') as writer:
+                df_result.to_excel(writer, index=False, sheet_name="PowerQuery三表整合")
+            st.download_button(
+                label="📥 匯出並下載此三表整合交叉比對表 (.xlsx)", 
+                data=towrite_pq.getvalue(), 
+                file_name=f"三表整合比對結果_{datetime.date.today().strftime('%Y%m%d')}.xlsx", 
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+            
+        with col_btn2:
+            # ✨ 功能 2：自動回寫到雲端統整表
+            if st.button("🔄 執行：將整合結果回寫並更新至雲端『商品蝦皮麗嬰價格統整表』", type="secondary", use_container_width=True):
+                with st.spinner("💾 正在將整合資料寫入 Excel 並上傳覆蓋雲端統整表檔案..."):
+                    try:
+                        # 轉為二進位流
+                        output_stream = io.BytesIO()
+                        with pd.ExcelWriter(output_stream, engine='openpyxl') as writer:
+                            df_result.to_excel(writer, index=False, sheet_name="商品蝦皮麗嬰價格統整表")
+                        output_stream.seek(0)
+                        
+                        creds = get_gdrive_credentials()
+                        service = build('drive', 'v3', credentials=creds)
+                        
+                        media = MediaIoBaseUpload(output_stream, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', resumable=True)
+                        
+                        if existing_summary_id:
+                            # 🟢 檔案存在：執行「更新 (Update)」覆蓋舊檔，File ID 維持不變
+                            service.files().update(
+                                fileId=existing_summary_id,
+                                media_body=media
+                            ).execute()
+                            st.success(f"✅ 成功回寫！已自動覆蓋並更新雲端現有檔案 (ID: {existing_summary_id})")
+                        else:
+                            # 🟡 檔案不存在：在價格統整資料夾內建立新檔案
+                            file_metadata = {
+                                'name': '商品蝦皮麗嬰價格統整表.xlsx',
+                                'parents': [ID_PRICE_SUMMARY_FOLDER]
+                            }
+                            new_file = service.files().create(
+                                body=file_metadata,
+                                media_body=media,
+                                fields='id'
+                            ).execute()
+                            st.success(f"✨ 成功回寫！雲端未偵測到舊檔，已全新建立檔案 (新 ID: {new_file.get('id')})")
+                        
+                        # 🚀 關鍵：回寫完成後清除本地快取，以便即時動態更新下一回進入時顯示的時間
+                        if "gdrive_id_cache" in st.session_state:
+                            cache_key = f"{ID_PRICE_SUMMARY_FOLDER}_商品蝦皮麗嬰價格統整表"
+                            if cache_key in st.session_state["gdrive_id_cache"]:
+                                del st.session_state["gdrive_id_cache"][cache_key]
+                        
+                        # 提示使用者刷新或點選其他分頁看最新時間
+                        st.info("💡 雲端檔案已更新！重新整理頁面後，上方將會顯示最新的修改時間。")
+                                
+                    except Exception as upload_error:
+                        st.error(f"❌ 回寫雲端失敗，請檢查網路狀況或 API 權限: {str(upload_error)}")preadsheetml.sheet")
 
 # -------------------------------------------------------------------------
 # 子功能 3：🔍 麗嬰商品總表數據查詢 (新增多筆條碼批次查詢功能)
