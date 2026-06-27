@@ -504,7 +504,7 @@ elif sub_page == "🧠 PowerQuery 執行三表整合":
                         st.info("💡 雲端檔案已更新！重新整理頁面後，上方將會顯示最新的修改時間。")
                                 
                     except Exception as upload_error:
-                        st.error(f"❌ 回寫雲端失敗，請檢查網路狀況或 API 權限: {str(upload_error)}")preadsheetml.sheet")
+                        st.error(f"❌ 回寫雲端失敗，請檢查網路狀況或 API 權限: {str(upload_error)}")
 
 # -------------------------------------------------------------------------
 # 子功能 3：🔍 麗嬰商品總表數據查詢 (新增多筆條碼批次查詢功能)
