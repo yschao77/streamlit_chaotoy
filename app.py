@@ -595,7 +595,7 @@ elif sub_page == "🔍 麗嬰商品總表數據查詢":
             st.error(f"❌ 讀取分頁數據失敗: {str(e)}")
 
 # -------------------------------------------------------------------------
-# 子功能 4：⚖️ 麗嬰商品表合併和與審核
+# 子功能 4：⚖️ 麗嬰商品表合併和與審核 (新增歸檔後一鍵整合回寫快捷鍵)
 # -------------------------------------------------------------------------
 elif sub_page == "⚖️ 麗嬰商品表合併和與審核":
     st.subheader("🧸 麗嬰採購單一鍵導入與審核系統")
@@ -604,9 +604,74 @@ elif sub_page == "⚖️ 麗嬰商品表合併和與審核":
     df_total, df_history, df_delete_log, df_meta, _, current_max_uid = load_master_data(ID_MASTER_FILE)
     if df_total is None: st.stop()
 
+    # 顯示歸檔成功的重大提示與快捷功能
     if 'merge_success_msg' in st.session_state:
         st.success(st.session_state['merge_success_msg'])
-        del st.session_state['merge_success_msg']
+        
+        # ── 🌟 全新亮點：歸檔成功後原地跳出快捷控制面板 ──
+        st.markdown("### ⚡ 歸檔後後續自動化推薦操作")
+        st.info("💡 採購單已成功存入麗嬰總表！現在您可以直接點擊下方按鈕，原地啟動跨表 PowerQuery 整合並自動更新雲端統整表。")
+        
+        if st.button("🚀 馬上執行：三表資料整合並自動回寫更新至雲端『商品蝦皮麗嬰價格統整表』", type="primary", use_container_width=True):
+            with st.spinner("⏳ 正在跨資料庫調閱核心數據、執行大數據 VLOOKUP 計算並回寫雲端..."):
+                try:
+                    # 1. 執行與子功能 2 一模一樣的核心整合邏輯
+                    engine_kw = {"engine": "calamine"} if HAS_CALAMINE else {}
+                    df_liying_calc = pd.read_excel(download_gdrive_file_to_bytes(ID_MASTER_FILE), sheet_name="麗嬰國際產品總表", **engine_kw)
+                    df_p_calc = pd.read_excel(download_gdrive_file_to_bytes(ID_LOCAL_PROD), sheet_name="商品iSKU清單", **engine_kw)
+                    df_s_calc = pd.read_excel(download_gdrive_file_to_bytes(ID_SHOPEE_MASTER), sheet_name="蝦皮商品列表", **engine_kw)
+                    
+                    df_liying_calc['條碼'] = df_liying_calc['條碼'].astype(str).str.strip().str.split('.').str[0]
+                    df_p_calc["自定義編碼"] = df_p_calc["自定義編碼"].astype(str).str.strip().str.split('.').str[0]
+                    df_s_calc["iSKU"] = df_s_calc["iSKU"].astype(str).str.strip().str.split('.').str[0]
+                    
+                    df_merge1 = pd.merge(df_p_calc, df_s_calc[["iSKU", "GTIN", "價格"]], left_on="自定義編碼", right_on="iSKU", how="left").rename(columns={"GTIN": "蝦皮GTIN", "價格": "蝦皮售價"})
+                    df_merge1["c"] = df_merge1["c"].astype(str).str.strip().str.split('.').str[0]
+                    
+                    df_final_calc = pd.merge(df_merge1, df_liying_calc[["條碼", "零售價", "含稅"]], left_on="c", right_on="條碼", how="left").rename(columns={"零售價": "麗嬰零售價", "含稅": "麗嬰批發含稅價", "條碼": "麗嬰條碼"})
+                    df_final_calc["麗嬰商品"] = df_final_calc["麗嬰條碼"].apply(lambda x: None if pd.isna(x) else "v")
+                    
+                    for c in ["蝦皮售價", "麗嬰零售價", "麗嬰批發含稅價"]:
+                        df_final_calc[c] = pd.to_numeric(df_final_calc[c], errors='coerce')
+                        
+                    df_final_calc["麗嬰零售八折"] = df_final_calc["麗嬰零售價"] * 0.8
+                    df_final_calc["麗嬰八折比蝦皮貴"] = df_final_calc.apply(lambda r: "v" if (pd.notna(r["麗嬰零售八折"]) and pd.notna(r["蝦皮售價"]) and r["麗嬰零售八折"] > r["蝦皮售價"]) else None, axis=1)
+                    df_final_calc["麗嬰未稅價"] = df_final_calc["麗嬰批發含稅價"].apply(lambda x: round(x / 1.05) if pd.notna(x) else None)
+                    df_final_calc["麗嬰稅款"] = df_final_calc.apply(lambda r: round(r["麗嬰批發含稅價"] - r["麗嬰未稅價"]) if (pd.notna(r["麗嬰批發含稅價"]) and pd.notna(r["麗嬰未稅價"])) else None, axis=1)
+                    
+                    # 計算完成的結果乾淨去除 iSKU 後存入 session
+                    df_pq_final = df_final_calc.drop(columns=["iSKU"], errors="ignore")
+                    st.session_state['pq_result'] = df_pq_final
+                    
+                    # 2. 開始串接回寫雲端邏輯
+                    output_stream = io.BytesIO()
+                    with pd.ExcelWriter(output_stream, engine='openpyxl') as writer:
+                        df_pq_final.to_excel(writer, index=False, sheet_name="商品蝦皮麗嬰價格統整表")
+                    output_stream.seek(0)
+                    
+                    # 探查現有的價格統整表 ID
+                    existing_summary_id, _, _ = get_cached_gdrive_id(ID_PRICE_SUMMARY_FOLDER, "商品蝦皮麗嬰價格統整表")
+                    media = MediaIoBaseUpload(output_stream, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', resumable=True)
+                    
+                    if existing_summary_id:
+                        service.files().update(fileId=existing_summary_id, media_body=media).execute()
+                    else:
+                        file_metadata = {'name': '商品蝦皮麗嬰價格統整表.xlsx', 'parents': [ID_PRICE_SUMMARY_FOLDER]}
+                        service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+                    
+                    # 3. 清除雲端快取
+                    if "gdrive_id_cache" in st.session_state:
+                        cache_key = f"{ID_PRICE_SUMMARY_FOLDER}_商品蝦皮麗嬰價格統整表"
+                        if cache_key in st.session_state["gdrive_id_cache"]:
+                            del st.session_state["gdrive_id_cache"][cache_key]
+                            
+                    st.success("🎯 狂賀！三表整合計算完成，且『商品蝦皮麗嬰價格統整表』已在雲端同步刷新完畢！")
+                    # 處理完畢後，把成功提示銷毀，回歸正常畫面
+                    del st.session_state['merge_success_msg']
+                    
+                except Exception as ex:
+                    st.error(f"❌ 快捷整合或回寫失敗，請手動至 PowerQuery 頁面執行: {str(ex)}")
+        st.write("---")
 
     uploaded_files = st.file_uploader("📥 選擇採購單 Excel (可多選批次上傳)", type=["xlsx", "xls", "xlsm"], accept_multiple_files=True, key="main_merge_files")
     
@@ -692,14 +757,15 @@ elif sub_page == "⚖️ 麗嬰商品表合併和與審核":
             df_total = run_cross_matching(df_total)
             
             if save_to_master_xlsm({"麗嬰國際產品總表": df_total, "已匯入採購單": df_history, "metadata": df_meta}):
-                # 優化：資料變更後，主動清除快取
                 load_master_data.clear()
                 get_cached_gdrive_id.clear()
+                # 💡 關鍵：設定 Session 訊息後刷新頁面，下次載入時就會立刻在最上方呈現快捷按鈕！
                 st.session_state['merge_success_msg'] = f"🎉 成功完成歸檔與雲端同步寫入！順利處理 {success_count} 份檔案。 (跳過重複檔: {dup_count})"
                 st.rerun()
 
     st.write("---")
     st.subheader("⚠️ 條碼重複與衝突即時審核控制台")
+    # ... 審核控制台後續邏輯完全不變 ...
     if not df_total.empty:
         if 'move' in df_total.columns: df_total = df_total.drop(columns=['move'])
         df_total.insert(0, 'move', False)
