@@ -903,14 +903,19 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
                             
                                 # ── ⚙️ 廠商判定邏輯：只有麗嬰才從總表抓成本與稅款，其餘維持 None ──
                                 if vendor_name == "麗嬰":
+                                    or_raw = match_row.get('麗嬰零售價', None)
+                                    sal_raw = match_row.get('麗嬰批發含稅價',None)
                                     c_raw = match_row.get('麗嬰未稅價', None)
                                     t_raw = match_row.get('麗嬰稅款', None)
                                     cost_val = float(c_raw) if pd.notna(c_raw) else None
                                     tax_val = float(t_raw) if pd.notna(t_raw) else None
+                                    or_val = float(or_raw) if pd.notna(or_raw) else None
+                                    sal_val = float(sa;_raw) if pd.notna(sal_raw) else None
 
                         result_rows.append({
                             "收貨日": str(recv_date), "國際條碼": barcode_input,
                             "庫存SKU": sku_final, "庫存貨品名稱": prod_name, 
+                            "麗嬰零售價": or_val, "麗嬰批發含稅價": sal_val,
                             "成本": cost_val, "稅款": tax_val, "數量": qty,
                             "分類定義": category, "產品關鍵字": keywords
                         })                    
