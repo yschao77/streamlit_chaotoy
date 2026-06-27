@@ -932,7 +932,7 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
         current_vendor = st.session_state.get('current_vendor_name', '未命名廠商')
         current_order = st.session_state.get('current_order_no', '0000')
         
-        target_columns = ["國際條碼","庫存SKU", "庫存貨品名稱", "成本", "稅款", "數量"]
+        target_columns = ["國際條碼","庫存SKU", "庫存貨品名稱", "麗嬰零售價", "麗嬰批發含稅價", "成本", "稅款", "數量"]
         available_cols = [col for col in target_columns if col in res_df.columns]
         df_download = res_df[available_cols].copy()
         
