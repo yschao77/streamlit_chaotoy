@@ -910,7 +910,7 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
                                     cost_val = float(c_raw) if pd.notna(c_raw) else None
                                     tax_val = float(t_raw) if pd.notna(t_raw) else None
                                     or_val = float(or_raw) if pd.notna(or_raw) else None
-                                    sal_val = float(sa;_raw) if pd.notna(sal_raw) else None
+                                    sal_val = float(sal_raw) if pd.notna(sal_raw) else None
 
                         result_rows.append({
                             "收貨日": str(recv_date), "國際條碼": barcode_input,
