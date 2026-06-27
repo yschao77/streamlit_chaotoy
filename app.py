@@ -468,9 +468,9 @@ elif sub_page == "🧠 PowerQuery 執行三表整合":
                         with pd.ExcelWriter(output_stream, engine='openpyxl') as writer:
                             df_result.to_excel(writer, index=False, sheet_name="商品蝦皮麗嬰價格統整表")
                         output_stream.seek(0)
-                        
-                        creds = get_gdrive_credentials()
-                        service = build('drive', 'v3', credentials=creds)
+
+                        # 尋找雲端資料夾中是否已有舊的「商品蝦皮麗嬰價格統整表」
+                        existing_summary_id, existing_summary_time, _ = get_cached_gdrive_id(ID_PRICE_SUMMARY_FOLDER, "商品蝦皮麗嬰價格統整表")
                         
                         media = MediaIoBaseUpload(output_stream, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', resumable=True)
                         
