@@ -547,12 +547,12 @@ elif sub_page == "🧠 PowerQuery 執行三表整合":
         with col_btn2:
             # ✨ 功能 2：強制覆寫雲端統整表
             with col_btn2:
-            if st.button("🔄 執行：將整合結果回寫並更新至雲端『商品蝦皮麗嬰價格統整表』", type="secondary", use_container_width=True):
-                with st.spinner("💾 正在覆寫更新雲端現有統整表檔案..."):
-                    # ── 🌟 直接一鍵調用全域 Function ──
-                    if run_powerquery_and_update_gdrive():
-                        st.success("✅ 雲端統整表已成功同步覆寫更新！")
-                        st.info("💡 重新整理頁面後，上方將會顯示最新的修改時間。")
+                if st.button("🔄 執行：將整合結果回寫並更新至雲端『商品蝦皮麗嬰價格統整表』", type="secondary", use_container_width=True):
+                    with st.spinner("💾 正在覆寫更新雲端現有統整表檔案..."):
+                        # ── 🌟 直接一鍵調用全域 Function ──
+                        if run_powerquery_and_update_gdrive():
+                            st.success("✅ 雲端統整表已成功同步覆寫更新！")
+                            st.info("💡 重新整理頁面後，上方將會顯示最新的修改時間。")
                         
 # -------------------------------------------------------------------------
 # 子功能 3：🔍 麗嬰商品總表數據查詢 (新增多筆條碼批次查詢功能)
