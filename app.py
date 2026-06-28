@@ -116,15 +116,25 @@ def download_gdrive_file_to_bytes(file_id):
     return file_stream
 
 def upload_or_update_gdrive_file(folder_id, file_name, file_bytes, existing_file_id=None):
-    """上傳新檔案到指定的 Google Drive 資料夾或覆寫現有檔案"""
-    media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', resumable=True)
+    """【強制覆寫優化版】一律不允許機器人 Create 新檔案，強制執行 Update 覆寫"""
+    media = MediaIoBaseUpload(
+        io.BytesIO(file_bytes), 
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 
+        resumable=True
+    )
+    
     if existing_file_id:
-        service.files().update(fileId=existing_file_id, media_body=media).execute()
+        # 🟢 只准執行 Update，並加入雙重防呆參數
+        service.files().update(
+            fileId=existing_file_id, 
+            media_body=media, 
+            supportsAllDrives=True
+        ).execute()
         return existing_file_id
     else:
-        file_metadata = {'name': file_name, 'parents': [folder_id]}
-        file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-        return file.get('id')
+        # 🔴 防呆攔截：阻斷任何可能引發 0GB 空間配額爆炸的 create 行為
+        st.error(f"❌ 拒絕建立新檔案【{file_name}】！為避免 Google 空間配額錯誤，請先手動於雲端建立該空白檔案，並將 ID 配置於系統中。")
+        st.stop()
 
 def format_gdrive_time(time_str):
     if not time_str:
@@ -459,49 +469,33 @@ elif sub_page == "🧠 PowerQuery 執行三表整合":
             )
             
         with col_btn2:
-            # ✨ 功能 2：自動回寫到雲端統整表
+            # ✨ 功能 2：強制覆寫雲端統整表
             if st.button("🔄 執行：將整合結果回寫並更新至雲端『商品蝦皮麗嬰價格統整表』", type="secondary", use_container_width=True):
-                with st.spinner("💾 正在將整合資料寫入 Excel 並上傳覆蓋雲端統整表檔案..."):
+                with st.spinner("💾 正在覆寫更新雲端現有統整表檔案..."):
                     try:
-                        # 轉為二進位流
                         output_stream = io.BytesIO()
                         with pd.ExcelWriter(output_stream, engine='openpyxl') as writer:
                             df_result.to_excel(writer, index=False, sheet_name="商品蝦皮麗嬰價格統整表")
                         output_stream.seek(0)
-
-                        # 尋找雲端資料夾中是否已有舊的「商品蝦皮麗嬰價格統整表」
-                        existing_summary_id, existing_summary_time, _ = get_cached_gdrive_id(ID_PRICE_SUMMARY_FOLDER, "商品蝦皮麗嬰價格統整表")
                         
                         media = MediaIoBaseUpload(output_stream, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', resumable=True)
                         
+                        # ── 🟢 修正：只准 Update 既有檔案，絕對不執行 Create ──
                         if existing_summary_id:
-                            # 🟢 檔案存在：執行「更新 (Update)」覆蓋舊檔，File ID 維持不變
                             service.files().update(
                                 fileId=existing_summary_id,
-                                media_body=media
+                                media_body=media,
+                                supportsAllDrives=True
                             ).execute()
                             st.success(f"✅ 成功回寫！已自動覆蓋並更新雲端現有檔案 (ID: {existing_summary_id})")
                         else:
-                            # 🟡 檔案不存在：在價格統整資料夾內建立新檔案
-                            file_metadata = {
-                                'name': '商品蝦皮麗嬰價格統整表.xlsx',
-                                'parents': [ID_PRICE_SUMMARY_FOLDER]
-                            }
-                            new_file = service.files().create(
-                                body=file_metadata,
-                                media_body=media,
-                                fields='id'
-                            ).execute()
-                            st.success(f"✨ 成功回寫！雲端未偵測到舊檔，已全新建立檔案 (新 ID: {new_file.get('id')})")
+                            st.error("❌ 回寫失敗：雲端目前不存在『商品蝦皮麗嬰價格統整表.xlsx』！請先至雲端硬碟手動建立一個同名空白檔案，確保擁有人是您個人，系統才能為您覆寫資料。")
+                            st.stop()
                         
-                        # 🚀 關鍵：回寫完成後清除本地快取，以便即時動態更新下一回進入時顯示的時間
                         if "gdrive_id_cache" in st.session_state:
                             cache_key = f"{ID_PRICE_SUMMARY_FOLDER}_商品蝦皮麗嬰價格統整表"
                             if cache_key in st.session_state["gdrive_id_cache"]:
                                 del st.session_state["gdrive_id_cache"][cache_key]
-                        
-                        # 提示使用者刷新或點選其他分頁看最新時間
-                        st.info("💡 雲端檔案已更新！重新整理頁面後，上方將會顯示最新的修改時間。")
                                 
                     except Exception as upload_error:
                         st.error(f"❌ 回寫雲端失敗，請檢查網路狀況或 API 權限: {str(upload_error)}")
@@ -653,11 +647,17 @@ elif sub_page == "⚖️ 麗嬰商品表合併和與審核":
                     existing_summary_id, _, _ = get_cached_gdrive_id(ID_PRICE_SUMMARY_FOLDER, "商品蝦皮麗嬰價格統整表")
                     media = MediaIoBaseUpload(output_stream, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', resumable=True)
                     
+                    # ── 🟢 修正：只准 Update，絕不 Create ──
                     if existing_summary_id:
-                        service.files().update(fileId=existing_summary_id, media_body=media).execute()
+                        service.files().update(
+                            fileId=existing_summary_id, 
+                            media_body=media, 
+                            supportsAllDrives=True
+                        ).execute()
+                        st.success("🎯 成功！三表整合完成，且雲端現有『商品蝦皮麗嬰價格統整表』已覆寫更新完畢！")
                     else:
-                        file_metadata = {'name': '商品蝦皮麗嬰價格統整表.xlsx', 'parents': [ID_PRICE_SUMMARY_FOLDER]}
-                        service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+                        st.error("❌ 整合成功但回寫失敗：雲端不存在該價格統整表，無法直接覆寫。")
+                        st.stop()
                     
                     # 3. 清除雲端快取
                     if "gdrive_id_cache" in st.session_state:
@@ -865,23 +865,25 @@ elif sub_page == "📈 蝦皮商品清單轉換":
                     df_gtin_check['GTIN_str'] = df_gtin_check['GTIN'].astype(str).str.strip().str.split('.').str[0]
                     df_gtin_keep = df_gtin_check[~df_gtin_check['GTIN_str'].isin(["", "00", "0", "nan"])].sort_values(by=['GTIN_str', '價格', 'original_index']).drop_duplicates(subset=['GTIN_str'], keep='last')
                     df_final_clean = pd.concat([df_gtin_keep, df_gtin_check[df_gtin_check['GTIN_str'].isin(["", "00", "0", "nan"])]]).sort_values(by='original_index')
-                    
-                    backup_sp_filename = f"蝦皮清洗備份_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-                    
+                                     
                     out_buf_sp = io.BytesIO()
                     df_final_clean.to_excel(out_buf_sp, index=False)
                     
-                    upload_or_update_gdrive_file(ID_SHOPEE_FOLDER, backup_sp_filename, out_buf_sp.getvalue())
+                    # ── 🟢 修正：強制只更新現有的「蝦皮賣場商品列表.xlsm」主表 ──
+                    if ID_SHOPEE_MASTER:
+                        upload_or_update_gdrive_file(ID_SHOPEE_FOLDER, "蝦皮賣場商品列表.xlsm", out_buf_sp.getvalue(), existing_file_id=ID_SHOPEE_MASTER)
+                    else:
+                        st.error("❌ 雲端找不到變數 `ID_SHOPEE_MASTER` 對應的現有主檔案 ID，無法執行覆寫更新。")
+                        st.stop()
                     
                     new_hist_log = pd.DataFrame([{"檔案名稱": uploaded_shopee.name, "md5": shopee_md5, "匯入時間": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}])
                     df_shopee_history = pd.concat([df_shopee_history, new_hist_log], ignore_index=True)
                     
                     if save_to_shopee_master_xlsm({"蝦皮商品列表": df_final_clean, "匯入檔案": df_shopee_history}):
-                        load_shopee_data.clear() # 優化：儲存完畢後清理快取
+                        load_shopee_data.clear() 
                         get_cached_gdrive_id.clear()
                         st.session_state['shopee_clean'] = df_final_clean
-
-                        st.success(f"🎉 蝦皮賣場商品列表iSKU結構校正完成！\n1. 備份檔案已存入雲端：`{backup_sp_filename}`\n2. 雲端 `蝦皮賣場商品列表.xlsm` 已同步更新！")
+                        st.success(f"🎉 蝦皮賣場商品列表iSKU結構校正完成！\n🟢 雲端現有主表 `蝦皮賣場商品列表.xlsm` 已成功同步覆寫更新！")
                 except Exception as e:
                     st.error(f"讀取或清洗蝦皮檔案失敗: {str(e)}")
 
