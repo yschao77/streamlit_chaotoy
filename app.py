@@ -354,6 +354,82 @@ st.title(f"{sub_page}")
 st.info(f"目前導覽路徑： {main_module} ➔ {sub_page}")
 st.write("---")
 
+# ==========================================
+# 🖥️ 7. 全域獨立功能: 三表 PowerQuery 整合、計算財務指標
+# ==========================================
+def run_powerquery_and_update_gdrive():
+    """
+    全域獨立功能：執行三表 PowerQuery 整合、計算財務指標，並強制 Update 覆寫至雲端統整表。
+    可在任何分頁直接調用，成功回傳 True，失敗回傳 False。
+    """
+    if not (ID_LOCAL_PROD and ID_SHOPEE_MASTER and ID_MASTER_FILE):
+        st.error("❌ 缺少核心資料主檔案 ID，無法啟動三表整合！")
+        return False
+        
+    try:
+        # 1. 跨表讀取數據
+        engine_kw = {"engine": "calamine"} if HAS_CALAMINE else {}
+        df_liying = pd.read_excel(download_gdrive_file_to_bytes(ID_MASTER_FILE), sheet_name="麗嬰國際產品總表", **engine_kw)
+        df_p = pd.read_excel(download_gdrive_file_to_bytes(ID_LOCAL_PROD), sheet_name="商品iSKU清單", **engine_kw)
+        df_s = pd.read_excel(download_gdrive_file_to_bytes(ID_SHOPEE_MASTER), sheet_name="蝦皮商品列表", **engine_kw)
+        
+        # 2. 資料清洗與標準化
+        df_liying['條碼'] = df_liying['條碼'].astype(str).str.strip().str.split('.').str[0]
+        df_p["自定義編碼"] = df_p["自定義編碼"].astype(str).str.strip().str.split('.').str[0]
+        df_s["iSKU"] = df_s["iSKU"].astype(str).str.strip().str.split('.').str[0]
+        
+        # 3. 模擬 PowerQuery 進行多表 Merge 關聯
+        df_merge1 = pd.merge(df_p, df_s[["iSKU", "GTIN", "價格"]], left_on="自定義編碼", right_on="iSKU", how="left").rename(columns={"GTIN": "蝦皮GTIN", "價格": "蝦皮售價"})
+        df_merge1["c"] = df_merge1["c"].astype(str).str.strip().str.split('.').str[0]
+        
+        df_final = pd.merge(df_merge1, df_liying[["條碼", "零售價", "含稅"]], left_on="c", right_on="條碼", how="left").rename(columns={"零售價": "麗嬰零售價", "含稅": "麗嬰批發含稅價", "條碼": "麗嬰條碼"})
+        df_final["麗嬰商品"] = df_final["麗嬰條碼"].apply(lambda x: None if pd.isna(x) else "v")
+        
+        # 4. 財務與稅款指標動態計算
+        for c in ["蝦皮售價", "麗嬰零售價", "麗嬰批發含稅價"]:
+            df_final[c] = pd.to_numeric(df_final[c], errors='coerce')
+            
+        df_final["麗嬰零售八折"] = df_final["麗嬰零售價"] * 0.8
+        df_final["麗嬰八折比蝦皮貴"] = df_final.apply(lambda r: "v" if (pd.notna(r["麗嬰零售八折"]) and pd.notna(r["蝦皮售價"]) and r["麗嬰零售八折"] > r["蝦皮售價"]) else None, axis=1)
+        df_final["麗嬰未稅價"] = df_final["麗嬰批發含稅價"].apply(lambda x: round(x / 1.05) if pd.notna(x) else None)
+        df_final["麗嬰稅款"] = df_final.apply(lambda r: round(r["麗嬰批發含稅價"] - r["麗嬰未稅價"]) if (pd.notna(r["麗嬰批發含稅價"]) and pd.notna(r["麗嬰未稅價"])) else None, axis=1)
+        
+        # 清除不必要的欄位並寫入全域狀態（供預覽與下載使用）
+        df_pq_final = df_final.drop(columns=["iSKU"], errors="ignore")
+        st.session_state['pq_result'] = df_pq_final
+        
+        # 5. 將結果轉為記憶體二進位流並準備覆寫雲端
+        output_stream = io.BytesIO()
+        with pd.ExcelWriter(output_stream, engine='openpyxl') as writer:
+            df_pq_final.to_excel(writer, index=False, sheet_name="商品蝦皮麗嬰價格統整表")
+        output_stream.seek(0)
+        
+        # 尋找雲端現有的「商品蝦皮麗嬰價格統整表」檔案 ID
+        existing_summary_id, _, _ = get_cached_gdrive_id(ID_PRICE_SUMMARY_FOLDER, "商品蝦皮麗嬰價格統整表")
+        
+        if existing_summary_id:
+            # 💡 呼叫你修改過、具備安全 Update 的全域函式進行覆寫
+            upload_or_update_gdrive_file(
+                folder_id=ID_PRICE_SUMMARY_FOLDER, 
+                file_name="商品蝦皮麗嬰價格統整表.xlsx", 
+                file_bytes=output_stream.getvalue(), 
+                existing_file_id=existing_summary_id
+            )
+            
+            # 6. 強制剔除本地快取，確保其他分頁刷新時能立即抓到最新數據
+            if "gdrive_id_cache" in st.session_state:
+                cache_key = f"{ID_PRICE_SUMMARY_FOLDER}_商品蝦皮麗嬰價格統整表"
+                if cache_key in st.session_state["gdrive_id_cache"]:
+                    del st.session_state["gdrive_id_cache"][cache_key]
+            return True
+        else:
+            st.error("❌ 雲端不存在『商品蝦皮麗嬰價格統整表』空白主表檔案，無法執行覆寫更新。")
+            return False
+            
+    except Exception as e:
+        st.error(f"❌ 自動化整合或回寫雲端時發生異常: {str(e)}")
+        return False
+
 # -------------------------------------------------------------------------
 # 子功能 1：📊 三表整合歷史
 # -------------------------------------------------------------------------
@@ -470,36 +546,14 @@ elif sub_page == "🧠 PowerQuery 執行三表整合":
             
         with col_btn2:
             # ✨ 功能 2：強制覆寫雲端統整表
+            with col_btn2:
             if st.button("🔄 執行：將整合結果回寫並更新至雲端『商品蝦皮麗嬰價格統整表』", type="secondary", use_container_width=True):
                 with st.spinner("💾 正在覆寫更新雲端現有統整表檔案..."):
-                    try:
-                        output_stream = io.BytesIO()
-                        with pd.ExcelWriter(output_stream, engine='openpyxl') as writer:
-                            df_result.to_excel(writer, index=False, sheet_name="商品蝦皮麗嬰價格統整表")
-                        output_stream.seek(0)
+                    # ── 🌟 直接一鍵調用全域 Function ──
+                    if run_powerquery_and_update_gdrive():
+                        st.success("✅ 雲端統整表已成功同步覆寫更新！")
+                        st.info("💡 重新整理頁面後，上方將會顯示最新的修改時間。")
                         
-                        media = MediaIoBaseUpload(output_stream, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', resumable=True)
-                        
-                        # ── 🟢 修正：只准 Update 既有檔案，絕對不執行 Create ──
-                        if existing_summary_id:
-                            service.files().update(
-                                fileId=existing_summary_id,
-                                media_body=media,
-                                supportsAllDrives=True
-                            ).execute()
-                            st.success(f"✅ 成功回寫！已自動覆蓋並更新雲端現有檔案 (ID: {existing_summary_id})")
-                        else:
-                            st.error("❌ 回寫失敗：雲端目前不存在『商品蝦皮麗嬰價格統整表.xlsx』！請先至雲端硬碟手動建立一個同名空白檔案，確保擁有人是您個人，系統才能為您覆寫資料。")
-                            st.stop()
-                        
-                        if "gdrive_id_cache" in st.session_state:
-                            cache_key = f"{ID_PRICE_SUMMARY_FOLDER}_商品蝦皮麗嬰價格統整表"
-                            if cache_key in st.session_state["gdrive_id_cache"]:
-                                del st.session_state["gdrive_id_cache"][cache_key]
-                                
-                    except Exception as upload_error:
-                        st.error(f"❌ 回寫雲端失敗，請檢查網路狀況或 API 權限: {str(upload_error)}")
-
 # -------------------------------------------------------------------------
 # 子功能 3：🔍 麗嬰商品總表數據查詢 (新增多筆條碼批次查詢功能)
 # -------------------------------------------------------------------------
@@ -608,69 +662,11 @@ elif sub_page == "⚖️ 麗嬰商品表合併和與審核":
         
         if st.button("🚀 馬上執行：三表資料整合並自動回寫更新至雲端『商品蝦皮麗嬰價格統整表』", type="primary", use_container_width=True):
             with st.spinner("⏳ 正在跨資料庫調閱核心數據、執行大數據 VLOOKUP 計算並回寫雲端..."):
-                try:
-                    # 1. 執行與子功能 2 一模一樣的核心整合邏輯
-                    engine_kw = {"engine": "calamine"} if HAS_CALAMINE else {}
-                    df_liying_calc = pd.read_excel(download_gdrive_file_to_bytes(ID_MASTER_FILE), sheet_name="麗嬰國際產品總表", **engine_kw)
-                    df_p_calc = pd.read_excel(download_gdrive_file_to_bytes(ID_LOCAL_PROD), sheet_name="商品iSKU清單", **engine_kw)
-                    df_s_calc = pd.read_excel(download_gdrive_file_to_bytes(ID_SHOPEE_MASTER), sheet_name="蝦皮商品列表", **engine_kw)
-                    
-                    df_liying_calc['條碼'] = df_liying_calc['條碼'].astype(str).str.strip().str.split('.').str[0]
-                    df_p_calc["自定義編碼"] = df_p_calc["自定義編碼"].astype(str).str.strip().str.split('.').str[0]
-                    df_s_calc["iSKU"] = df_s_calc["iSKU"].astype(str).str.strip().str.split('.').str[0]
-                    
-                    df_merge1 = pd.merge(df_p_calc, df_s_calc[["iSKU", "GTIN", "價格"]], left_on="自定義編碼", right_on="iSKU", how="left").rename(columns={"GTIN": "蝦皮GTIN", "價格": "蝦皮售價"})
-                    df_merge1["c"] = df_merge1["c"].astype(str).str.strip().str.split('.').str[0]
-                    
-                    df_final_calc = pd.merge(df_merge1, df_liying_calc[["條碼", "零售價", "含稅"]], left_on="c", right_on="條碼", how="left").rename(columns={"零售價": "麗嬰零售價", "含稅": "麗嬰批發含稅價", "條碼": "麗嬰條碼"})
-                    df_final_calc["麗嬰商品"] = df_final_calc["麗嬰條碼"].apply(lambda x: None if pd.isna(x) else "v")
-                    
-                    for c in ["蝦皮售價", "麗嬰零售價", "麗嬰批發含稅價"]:
-                        df_final_calc[c] = pd.to_numeric(df_final_calc[c], errors='coerce')
-                        
-                    df_final_calc["麗嬰零售八折"] = df_final_calc["麗嬰零售價"] * 0.8
-                    df_final_calc["麗嬰八折比蝦皮貴"] = df_final_calc.apply(lambda r: "v" if (pd.notna(r["麗嬰零售八折"]) and pd.notna(r["蝦皮售價"]) and r["麗嬰零售八折"] > r["蝦皮售價"]) else None, axis=1)
-                    df_final_calc["麗嬰未稅價"] = df_final_calc["麗嬰批發含稅價"].apply(lambda x: round(x / 1.05) if pd.notna(x) else None)
-                    df_final_calc["麗嬰稅款"] = df_final_calc.apply(lambda r: round(r["麗嬰批發含稅價"] - r["麗嬰未稅價"]) if (pd.notna(r["麗嬰批發含稅價"]) and pd.notna(r["麗嬰未稅價"])) else None, axis=1)
-                    
-                    # 計算完成的結果乾淨去除 iSKU 後存入 session
-                    df_pq_final = df_final_calc.drop(columns=["iSKU"], errors="ignore")
-                    st.session_state['pq_result'] = df_pq_final
-                    
-                    # 2. 開始串接回寫雲端邏輯
-                    output_stream = io.BytesIO()
-                    with pd.ExcelWriter(output_stream, engine='openpyxl') as writer:
-                        df_pq_final.to_excel(writer, index=False, sheet_name="商品蝦皮麗嬰價格統整表")
-                    output_stream.seek(0)
-                    
-                    # 探查現有的價格統整表 ID
-                    existing_summary_id, _, _ = get_cached_gdrive_id(ID_PRICE_SUMMARY_FOLDER, "商品蝦皮麗嬰價格統整表")
-                    media = MediaIoBaseUpload(output_stream, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', resumable=True)
-                    
-                    # ── 🟢 修正：只准 Update，絕不 Create ──
-                    if existing_summary_id:
-                        service.files().update(
-                            fileId=existing_summary_id, 
-                            media_body=media, 
-                            supportsAllDrives=True
-                        ).execute()
-                        st.success("🎯 成功！三表整合完成，且雲端現有『商品蝦皮麗嬰價格統整表』已覆寫更新完畢！")
-                    else:
-                        st.error("❌ 整合成功但回寫失敗：雲端不存在該價格統整表，無法直接覆寫。")
-                        st.stop()
-                    
-                    # 3. 清除雲端快取
-                    if "gdrive_id_cache" in st.session_state:
-                        cache_key = f"{ID_PRICE_SUMMARY_FOLDER}_商品蝦皮麗嬰價格統整表"
-                        if cache_key in st.session_state["gdrive_id_cache"]:
-                            del st.session_state["gdrive_id_cache"][cache_key]
-                            
-                    st.success("🎯 狂賀！三表整合計算完成，且『商品蝦皮麗嬰價格統整表』已在雲端同步刷新完畢！")
-                    # 處理完畢後，把成功提示銷毀，回歸正常畫面
+                # ── 🌟 直接一鍵調用全域 Function ──
+                if run_powerquery_and_update_gdrive():
+                    st.success("🎯 狂賀！三表整合計算完成，且『商品蝦皮麗嬰價格統整表』已在雲端同步覆寫更新完畢！")
                     del st.session_state['merge_success_msg']
                     
-                except Exception as ex:
-                    st.error(f"❌ 快捷整合或回寫失敗，請手動至 PowerQuery 頁面執行: {str(ex)}")
         st.write("---")
 
     uploaded_files = st.file_uploader("📥 選擇採購單 Excel (可多選批次上傳)", type=["xlsx", "xls", "xlsm"], accept_multiple_files=True, key="main_merge_files")
@@ -884,6 +880,14 @@ elif sub_page == "📈 蝦皮商品清單轉換":
                         get_cached_gdrive_id.clear()
                         st.session_state['shopee_clean'] = df_final_clean
                         st.success(f"🎉 蝦皮賣場商品列表iSKU結構校正完成！\n🟢 雲端現有主表 `蝦皮賣場商品列表.xlsm` 已成功同步覆寫更新！")
+                        
+                        # ── 🌟 新增：讓蝦皮校正完也能原地一鍵觸發更新統整表 ──
+                        st.markdown("---")
+                        st.markdown("### ⚡ 後續自動化推薦操作")
+                        if st.button("🚀 馬上更新：以最新校正的蝦皮資料重新執行三表整合並回寫雲端", type="primary", use_container_width=True):
+                            with st.spinner("⏳ 正在重新整理跨表聯結數據並回寫..."):
+                                if run_powerquery_and_update_gdrive():
+                                    st.success("✅ 成功！雲端『商品蝦皮麗嬰價格統整表』已同步使用最新校正後的蝦皮資料覆寫更新！")
                 except Exception as e:
                     st.error(f"讀取或清洗蝦皮檔案失敗: {str(e)}")
 
