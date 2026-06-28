@@ -866,7 +866,7 @@ elif sub_page == "📈 蝦皮商品清單轉換":
                     df_gtin_keep = df_gtin_check[~df_gtin_check['GTIN_str'].isin(["", "00", "0", "nan"])].sort_values(by=['GTIN_str', '價格', 'original_index']).drop_duplicates(subset=['GTIN_str'], keep='last')
                     df_final_clean = pd.concat([df_gtin_keep, df_gtin_check[df_gtin_check['GTIN_str'].isin(["", "00", "0", "nan"])]]).sort_values(by='original_index')
                     
-                    backup_sp_filename = f"蝦皮清洗備份_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                    backup_sp_filename = "蝦皮賣場商品列表.xlsm"
                     out_buf_sp = io.BytesIO()
                     df_final_clean.to_excel(out_buf_sp, index=False)
                     upload_or_update_gdrive_file(ID_SHOPEE_FOLDER, backup_sp_filename, out_buf_sp.getvalue())
@@ -878,7 +878,7 @@ elif sub_page == "📈 蝦皮商品清單轉換":
                         load_shopee_data.clear() # 優化：儲存完畢後清理快取
                         get_cached_gdrive_id.clear()
                         st.session_state['shopee_clean'] = df_final_clean
-                        st.success(f"🎉 格式標準化校正成功！\n1. 備份：`{backup_sp_filename}`\n2. 雲端 `蝦皮賣場商品列表.xlsm` 已同步更新！")
+                        st.success(f"🎉 蝦皮賣場商品列表iSKU結構校正完成！\n1. 備份：`{backup_sp_filename}`\n2. 雲端 `蝦皮賣場商品列表.xlsm` 已同步更新！")
                 except Exception as e:
                     st.error(f"讀取或清洗蝦皮檔案失敗: {str(e)}")
 
