@@ -370,7 +370,7 @@ def run_powerquery_and_update_gdrive():
         # 1. 跨表讀取數據
         engine_kw = {"engine": "calamine"} if HAS_CALAMINE else {}
         df_liying = pd.read_excel(download_gdrive_file_to_bytes(ID_MASTER_FILE), sheet_name="麗嬰國際產品總表", **engine_kw)
-        df_p = pd.read_excel(download_gdrive_file_to_bytes(ID_LOCAL_PROD), sheet_name="商品iSKU清單", **engine_kw)
+        df_p = pd.read_excel(download_gdrive_file_to_bytes(ID_LOCAL_PROD), sheet_name=0, **engine_kw)
         df_s = pd.read_excel(download_gdrive_file_to_bytes(ID_SHOPEE_MASTER), sheet_name="蝦皮商品列表", **engine_kw)
         
         # 2. 資料清洗與標準化
