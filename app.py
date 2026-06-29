@@ -1065,7 +1065,7 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
         with pd.ExcelWriter(towrite_inward, engine='openpyxl') as writer:
             edited_inward_df.to_excel(writer, index=False, sheet_name="SiteGiant入庫單")
             
-        final_filename = f"sitegiant採購入庫單_{current_vendor}_{current_order}.xlsx"
+        final_filename = f"sitegiant採購入庫單_{recv_date}_{current_vendor}_{current_order}.xlsx"
 
        # upload_or_update_gdrive_file(ID_HISTORY_INWARD_FOLDER, final_filename, towrite_inward.getvalue())
         st.download_button(label=f"📥 下載sitegiant格式採購入庫單 ({final_filename})", data=towrite_inward.getvalue(), file_name=final_filename, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
