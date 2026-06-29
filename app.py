@@ -493,7 +493,7 @@ elif sub_page == "🧠 PowerQuery 執行三表整合":
                     # 優化：跨表巨量讀取，指定使用 calamine 引擎大幅加速
                     engine_kw = {"engine": "calamine"} if HAS_CALAMINE else {}
                     df_liying = pd.read_excel(download_gdrive_file_to_bytes(ID_MASTER_FILE), sheet_name="麗嬰國際產品總表", **engine_kw)
-                    df_p = pd.read_excel(download_gdrive_file_to_bytes(ID_LOCAL_PROD), sheet_name="商品iSKU清單", **engine_kw)
+                    df_p = pd.read_excel(download_gdrive_file_to_bytes(ID_LOCAL_PROD), sheet_name=0, **engine_kw)
                     df_s = pd.read_excel(download_gdrive_file_to_bytes(ID_SHOPEE_MASTER), sheet_name="蝦皮商品列表", **engine_kw)
                     
                     df_liying['條碼'] = df_liying['條碼'].astype(str).str.strip().str.split('.').str[0]
