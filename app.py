@@ -917,6 +917,7 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
 
     with c_meta2:
         recv_date = st.date_input("📅 選擇收貨日：", value=datetime.date.today())
+        recv_date = recv_date.strftime("%y%m%d")
         
     st.write("---")
     st.subheader("🚀 條碼與數量批次快速貼上")
