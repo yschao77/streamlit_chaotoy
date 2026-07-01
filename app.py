@@ -696,7 +696,7 @@ elif sub_page == "⚖️ 麗嬰商品表合併和與審核":
     if "狀態" not in df_history.columns:
         df_history["狀態"] = ""
 
-    if ('merge_success_msg' in st.session_state) and ('success_count' in st.session_state and st.session_state.success_count > 1):
+    if 'merge_success_msg' in st.session_state:
         st.success(st.session_state['merge_success_msg'])
         st.markdown("### ⚡ 歸檔後後續自動化推薦操作")
         st.info("💡 採購單已成功存入麗嬰總表！直接點擊下方按鈕， PowerQuery 整合並自動更新雲端統整表。")
@@ -711,8 +711,7 @@ elif sub_page == "⚖️ 麗嬰商品表合併和與審核":
     
     if uploaded_files:
         if st.button("🚀 開始一鍵合併到麗嬰總表", type="primary"):
-            dup_count = no_barcode_count = anomaly_count = 0
-            st.session_state.success_count = 0
+            success_count = dup_count = no_barcode_count = anomaly_count = 0
             new_rows, history_records = [], []
             valid_dfs_to_merge = []
             
@@ -869,7 +868,7 @@ elif sub_page == "⚖️ 麗嬰商品表合併和與審核":
                                 master_dict[barcode] = row_data
 
                         # 4. 狀態判定：[已匯入] (成功處理完畢)
-                        st.session_state.success_count += 1
+                        success_count += 1
                         history_records.append({"檔案名稱": filename, "md5": file_md5, "匯入時間": now_time, "狀態": "[已匯入]"})
                         history_md5_list.append(file_md5)
                     
@@ -886,7 +885,7 @@ elif sub_page == "⚖️ 麗嬰商品表合併和與審核":
             if save_to_master_xlsm({"麗嬰國際產品總表": df_total, "已處理採購單": df_history, "metadata": df_meta}):
                 load_master_data.clear()
                 
-                report_msg = f"🎉 成功完成狀態登記與資料同步！\n\n✅ [已匯入]: 'success_count' 份\n🔁 [重複檔案]: {dup_count} 份\n⚠️ [無條碼欄位]: {no_barcode_count} 份"
+                report_msg = f"🎉 成功完成狀態登記與資料同步！\n\n✅ [已匯入]: {success_count} 份\n🔁 [重複檔案]: {dup_count} 份\n⚠️ [無條碼欄位]: {no_barcode_count} 份"
                 if anomaly_count > 0:
                     report_msg += f"\n\n🚨 注意：本次匯入發現 **{anomaly_count}** 筆異常衝突商品，已自動為您加上 🔴 🟢 標記於備註欄！"
                 
