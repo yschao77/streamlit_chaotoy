@@ -696,6 +696,17 @@ elif sub_page == "⚖️ 麗嬰商品表合併和與審核":
     if "狀態" not in df_history.columns:
         df_history["狀態"] = ""
 
+    if ('merge_success_msg' in st.session_state) and ('success_count' in st.session_state and st.session_state.success_count > 1):
+        st.success(st.session_state['merge_success_msg'])
+        st.markdown("### ⚡ 歸檔後後續自動化推薦操作")
+        st.info("💡 採購單已成功存入麗嬰總表！直接點擊下方按鈕， PowerQuery 整合並自動更新雲端統整表。")
+        if st.button("🚀 三表資料整合並自動回寫更新至雲端『商品蝦皮麗嬰價格統整表』", type="primary", use_container_width=True):
+            with st.spinner("⏳ 正在跨資料庫調閱核心數據、執行大數據 VLOOKUP 計算並回寫雲端..."):
+                if run_powerquery_and_update_gdrive():
+                    st.success("🎯 狂賀！三表整合『商品蝦皮麗嬰價格統整表』已在雲端同步覆寫更新完畢！")
+                    del st.session_state['merge_success_msg']   
+        st.write("---")
+
     uploaded_files = st.file_uploader("📥 選擇採購單 Excel (可多選批次上傳)", type=["xlsx", "xls", "xlsm"], accept_multiple_files=True, key="main_merge_files")
     
     if uploaded_files:
@@ -943,15 +954,7 @@ elif sub_page == "⚖️ 麗嬰商品表合併和與審核":
             st.success("🟢 當前總表中沒有任何重複商品的衝突。")
 
     st.write("---")   
-    if ('merge_success_msg' in st.session_state) and ('success_count' in st.session_state and st.session_state.success_count > 1):
-        st.success(st.session_state['merge_success_msg'])
-        st.markdown("### ⚡ 歸檔後後續自動化推薦操作")
-        st.info("💡 採購單已成功存入麗嬰總表！直接點擊下方按鈕， PowerQuery 整合並自動更新雲端統整表。")
-        if st.button("🚀 三表資料整合並自動回寫更新至雲端『商品蝦皮麗嬰價格統整表』", type="primary", use_container_width=True):
-            with st.spinner("⏳ 正在跨資料庫調閱核心數據、執行大數據 VLOOKUP 計算並回寫雲端..."):
-                if run_powerquery_and_update_gdrive():
-                    st.success("🎯 狂賀！三表整合『商品蝦皮麗嬰價格統整表』已在雲端同步覆寫更新完畢！")
-                    del st.session_state['merge_success_msg']
+
 
 # -------------------------------------------------------------------------
 # 子功能 5：📈 蝦皮商品清單轉換
