@@ -940,7 +940,7 @@ elif sub_page == "⚖️ 麗嬰商品表合併和與審核":
         else:
             st.success("🟢 當前總表中沒有任何重複商品的衝突。")
 
-    if ('merge_success_msg' in st.session_state) and (success_count > 1):
+    if 'merge_success_msg' in st.session_state and success_count > 1:
         st.success(st.session_state['merge_success_msg'])
         st.markdown("### ⚡ 歸檔後後續自動化推薦操作")
         st.info("💡 採購單已成功存入麗嬰總表！直接點擊下方按鈕， PowerQuery 整合並自動更新雲端統整表。")
