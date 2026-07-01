@@ -880,6 +880,17 @@ elif sub_page == "⚖️ 麗嬰商品表合併和與審核":
                 
                 st.session_state['merge_success_msg'] = report_msg
                 st.rerun()
+    st.write("---")   
+    if 'merge_success_msg' in st.session_state and success_count > 1:
+        st.success(st.session_state['merge_success_msg'])
+        st.markdown("### ⚡ 歸檔後後續自動化推薦操作")
+        st.info("💡 採購單已成功存入麗嬰總表！直接點擊下方按鈕， PowerQuery 整合並自動更新雲端統整表。")
+        if st.button("🚀 三表資料整合並自動回寫更新至雲端『商品蝦皮麗嬰價格統整表』", type="primary", use_container_width=True):
+            with st.spinner("⏳ 正在跨資料庫調閱核心數據、執行大數據 VLOOKUP 計算並回寫雲端..."):
+                if run_powerquery_and_update_gdrive():
+                    st.success("🎯 狂賀！三表整合『商品蝦皮麗嬰價格統整表』已在雲端同步覆寫更新完畢！")
+                    del st.session_state['merge_success_msg']
+     
 
     st.write("---")
     st.subheader("⚠️ 條碼重複與衝突即時審核控制台")
@@ -940,16 +951,7 @@ elif sub_page == "⚖️ 麗嬰商品表合併和與審核":
         else:
             st.success("🟢 當前總表中沒有任何重複商品的衝突。")
 
-    if 'merge_success_msg' in st.session_state and success_count > 1:
-        st.success(st.session_state['merge_success_msg'])
-        st.markdown("### ⚡ 歸檔後後續自動化推薦操作")
-        st.info("💡 採購單已成功存入麗嬰總表！直接點擊下方按鈕， PowerQuery 整合並自動更新雲端統整表。")
-        if st.button("🚀 三表資料整合並自動回寫更新至雲端『商品蝦皮麗嬰價格統整表』", type="primary", use_container_width=True):
-            with st.spinner("⏳ 正在跨資料庫調閱核心數據、執行大數據 VLOOKUP 計算並回寫雲端..."):
-                if run_powerquery_and_update_gdrive():
-                    st.success("🎯 狂賀！三表整合『商品蝦皮麗嬰價格統整表』已在雲端同步覆寫更新完畢！")
-                    del st.session_state['merge_success_msg']
-        st.write("---")
+ 
 
 # -------------------------------------------------------------------------
 # 子功能 5：📈 蝦皮商品清單轉換
