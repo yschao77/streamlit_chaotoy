@@ -858,7 +858,7 @@ elif sub_page == "⚖️ 麗嬰商品表合併和與審核":
                                 master_dict[barcode] = row_data
 
                         # 4. 狀態判定：[已匯入] (成功處理完畢)
-                        success_count += 1
+                        st.session_state.success_count += 1
                         history_records.append({"檔案名稱": filename, "md5": file_md5, "匯入時間": now_time, "狀態": "[已匯入]"})
                         history_md5_list.append(file_md5)
                     
