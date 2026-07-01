@@ -874,7 +874,7 @@ elif sub_page == "⚖️ 麗嬰商品表合併和與審核":
             # ⭐ 注意這裡將回寫的 Sheet 名稱改為 "已處理採購單"
             if save_to_master_xlsm({"麗嬰國際產品總表": df_total, "已處理採購單": df_history, "metadata": df_meta}):
                 load_master_data.clear()
-                st.session_state['success_count'] = success_count
+                
                 report_msg = f"🎉 成功完成狀態登記與資料同步！\n\n✅ [已匯入]: 'success_count' 份\n🔁 [重複檔案]: {dup_count} 份\n⚠️ [無條碼欄位]: {no_barcode_count} 份"
                 if anomaly_count > 0:
                     report_msg += f"\n\n🚨 注意：本次匯入發現 **{anomaly_count}** 筆異常衝突商品，已自動為您加上 🔴 🟢 標記於備註欄！"
