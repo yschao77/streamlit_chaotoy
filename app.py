@@ -320,6 +320,67 @@ def load_shopee_data(file_id):
 if 'inward_input_df' not in st.session_state:
     st.session_state['inward_input_df'] = pd.DataFrame([{"國際條碼": "", "數量": 1}])
 
+# --- Google Drive 分類備份上傳函數 ---
+def upload_to_gdrive_folder(file_bytes, file_name, folder_id):
+    """將採購單檔案依據判定結果，上傳至對應的 Google Drive 雲端資料夾"""
+    try:
+        # 讀取 Streamlit Secrets 中的金鑰
+        creds = service_account.Credentials.from_service_account_info(
+            st.secrets["textkey"],
+            scopes=["https://www.googleapis.com/auth/drive"]
+        )
+        service = build("drive", "v3", credentials=creds)
+        
+        file_metadata = {
+            'name': file_name,
+            'parents': [folder_id]
+        }
+        # 使用不落地的記憶體串流上傳
+        media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", resumable=True)
+        service.files().create(body=file_metadata, media_body=media, fields='id', supportsAllDrives=True).execute()
+    except Exception as e:
+        st.error(f"❌ 雲端分類歸檔失敗 ({file_name}): {str(e)}")
+
+# --- 條碼格式終極清洗函數 ---
+def clean_barcode(val):
+    """強制清洗條碼：去除空格、網頁空白字元、還原 E+ 科學記號、去除浮點數後綴"""
+    if pd.isna(val): 
+        return ""
+    s = str(val).strip().replace(" ", "").replace("\xa0", "")
+    if s.lower() == "nan" or s == "": 
+        return ""
+    if s.endswith(".0"): 
+        s = s[:-2]
+    # 還原 Pandas 誤讀的科學記號 (如 4.71E+12)
+    if "e+" in s.lower() or "e" in s.lower():
+        try:
+            s = f"{float(s):.0f}"
+        except:
+            pass
+    return s
+
+# --- 智慧複合表頭處理函數 ---
+def process_smart_headers(df_raw, header_row_idx):
+    """完美重現 VBA 邏輯：當第5列有特定字眼時，與第6列合併為新標頭"""
+    if header_row_idx >= 5 and len(df_raw) > 5:
+        row_5 = df_raw.iloc[4].fillna("").astype(str).str.strip()
+        row_6 = df_raw.iloc[5].fillna("").astype(str).str.strip()
+        new_cols = []
+        for idx in range(len(df_raw.columns)):
+            c5 = row_5.iloc[idx] if idx < len(row_5) else ""
+            c6 = row_6.iloc[idx] if idx < len(row_6) else ""
+            
+            # 若第5列包含採購關鍵字，且與第6列不同，則動態結合 (例如: 內盒 + 12 = 內盒12)
+            if any(k in c5 for k in ["訂購", "CTN", "內盒", "數量", "單價"]) and c5 != c6 and c6 != "":
+                new_cols.append(f"{c5}{c6}")
+            elif c6 != "":
+                new_cols.append(c6)
+            else:
+                new_cols.append(c5)
+        return new_cols
+    else:
+        return [str(col).strip() for col in df_raw.iloc[header_row_idx].fillna("")]
+
 # ==========================================
 # 🧭 5. 側邊欄：導覽控制台
 # ==========================================
@@ -643,138 +704,205 @@ elif sub_page == "🔍 麗嬰商品總表數據查詢":
             st.error(f"❌ 讀取分頁數據失敗: {str(e)}")
 
 # -------------------------------------------------------------------------
-# 子功能 4：⚖️ 麗嬰商品表合併和與審核 (新增歸檔後一鍵整合回寫快捷鍵)
+# 子功能 4：⚖️ 麗嬰商品表合併和與審核 (新增分類歸檔、智慧勾稽與 UID 繼承)
 # -------------------------------------------------------------------------
 elif sub_page == "⚖️ 麗嬰商品表合併和與審核":
     st.subheader("🧸 麗嬰採購單一鍵導入與審核系統")
     
-    # 延遲載入並抓取已快取的主表狀態
+    # 雲端分類資料夾 ID 宣告
+    FOLDER_IMPORTED = "1sZ0qV0YFwFKPq_9gQpM0ctVUJifwxrQU"
+    FOLDER_DUPLICATE = "1j9a0ZenkOoNkpklLuxw8Dlh0OfB5o7MW"
+    FOLDER_NO_BARCODE = "1rmZdgzhRqMLpXIrMaqooaDCiYthunkU5"
+
     df_total, df_history, df_delete_log, df_meta, _, current_max_uid = load_master_data(ID_MASTER_FILE)
     if df_total is None: st.stop()
-
-    # 顯示歸檔成功的重大提示與快捷功能
-    if 'merge_success_msg' in st.session_state:
-        st.success(st.session_state['merge_success_msg'])
-        
-        # ── 🌟 全新亮點：歸檔成功後原地跳出快捷控制面板 ──
-        st.markdown("### ⚡ 歸檔後後續自動化推薦操作")
-        st.info("💡 採購單已成功存入麗嬰總表！現在您可以直接點擊下方按鈕，原地啟動跨表 PowerQuery 整合並自動更新雲端統整表。")
-        
-        if st.button("🚀 馬上執行：三表資料整合並自動回寫更新至雲端『商品蝦皮麗嬰價格統整表』", type="primary", use_container_width=True):
-            with st.spinner("⏳ 正在跨資料庫調閱核心數據、執行大數據 VLOOKUP 計算並回寫雲端..."):
-                # ── 🌟 直接一鍵調用全域 Function ──
-                if run_powerquery_and_update_gdrive():
-                    st.success("🎯 狂賀！三表整合計算完成，且『商品蝦皮麗嬰價格統整表』已在雲端同步覆寫更新完畢！")
-                    del st.session_state['merge_success_msg']
-                    
-        st.write("---")
 
     uploaded_files = st.file_uploader("📥 選擇採購單 Excel (可多選批次上傳)", type=["xlsx", "xls", "xlsm"], accept_multiple_files=True, key="main_merge_files")
     
     if uploaded_files:
-        if st.button("🚀 開始一鍵合併歸檔", type="primary"):
-            success_count = dup_count = no_barcode_count = 0
+        if st.button("🚀 開始一鍵合併與分類歸檔", type="primary"):
+            success_count = dup_count = no_barcode_count = anomaly_count = 0
             new_rows, history_records = [], []
-            master_dict = {str(row['條碼']).strip(): row for _, row in df_total.iterrows() if pd.notna(row['條碼'])}
             
-            for file in uploaded_files:
-                file_bytes = file.read()
-                file_md5 = calculate_md5(file_bytes)
-                if file_md5 in df_history['md5'].astype(str).values:
-                    dup_count += 1
-                    continue
-                try:
-                    df_src_raw = pd.read_excel(io.BytesIO(file_bytes), header=None)
-                    header_row = 0
-                    for idx, row in df_src_raw.iterrows():
-                        if row.astype(str).str.contains("條碼|國際條碼|EAN|Barcode|品名|名稱|零售價|單價").any():
-                            header_row = idx
-                            break
-                    df_src = pd.read_excel(io.BytesIO(file_bytes), header=header_row)
-                    df_src.columns = [str(col).strip() if ("Unnamed:" not in str(col) and str(col) != "nan") else "" for col in df_src.columns]
+            # 將總表轉換為記憶體高速字典，並事先清洗總表條碼作為 Key
+            master_dict = {}
+            for idx, row in df_total.iterrows():
+                b_key = clean_barcode(row.get('條碼', ''))
+                if b_key and b_key != "0":
+                    master_dict[b_key] = row
+            
+            # 確保歷史檔案 MD5 紀錄格式正確
+            history_md5_list = df_history['md5'].astype(str).tolist() if 'md5' in df_history.columns else []
+
+            with st.spinner("⏳ 正在執行：智慧表頭解析、防錯清洗、雲端分類派送與 UID 勾稽..."):
+                for file in uploaded_files:
+                    file_bytes = file.read()
+                    file_md5 = calculate_md5(file_bytes)
+                    filename = file.name
                     
-                    rename_dict = {}
-                    for col in df_src.columns:
-                        if col == "": continue
-                        col_clean = str(col).strip()
-                        if col_clean in ["名稱", "品名", "商品名稱", "中文", "中文品名", "品名規格", "Description"]: rename_dict[col] = "名稱"
-                        elif col_clean in ["條碼", "國際條碼", "EAN", "Barcode", "BARCODE", "條碼型號", "JAN CODE"]: rename_dict[col] = "條碼"
-                        elif col_clean in ["零售價", "建議售價", "單價", "定價", "售價", "Price"]: rename_dict[col] = "零售價"
-                        elif col_clean in ["商品編號", "貨號", "產品編號", "Item No", "ITEM"]: rename_dict[col] = "商品編號"
-                        elif col_clean in ["內盒", "Inner", "INNER"]: rename_dict[col] = "內盒"
-                        elif col_clean in ["CTN", "外箱", "箱入數", "Carton", "外箱數"]: rename_dict[col] = "CTN"
-                        elif col_clean in ["CTN訂購含稅價", "CTN含稅價", "CTN含稅", "外箱含稅價", "外箱進價"]: rename_dict[col] = "CTN含稅"
-                        elif col_clean in ["內盒訂購含稅價", "內盒含稅價", "內盒含稅", "內盒進價", "含稅", "含稅價", "進價"]: rename_dict[col] = "含稅"
-                    df_src = df_src.rename(columns=rename_dict)
-                    if "條碼" not in df_src.columns:
-                        no_barcode_count += 1
+                    # 1. 重複檔案檢查與派送
+                    if file_md5 in history_md5_list:
+                        dup_count += 1
+                        upload_to_gdrive_folder(file_bytes, filename, FOLDER_DUPLICATE)
                         continue
-                    df_src['條碼'] = df_src['條碼'].astype(str).str.strip().str.split('.').str[0]
+                        
+                    try:
+                        # 讀取前15列尋找真正的標頭列
+                        df_src_raw = pd.read_excel(io.BytesIO(file_bytes), header=None, nrows=15)
+                        header_row = 0
+                        for idx, row in df_src_raw.iterrows():
+                            if row.astype(str).str.contains("條碼|國際條碼|EAN|Barcode|BARCODE").any():
+                                header_row = idx
+                                break
+                        
+                        # 2. 智慧複合表頭處理 (結合第5列與第6列)
+                        smart_columns = process_smart_headers(df_src_raw, header_row)
+                        
+                        # 完整讀取數據層，套用智慧標頭
+                        df_src = pd.read_excel(io.BytesIO(file_bytes), skiprows=header_row + 1, header=None)
+                        if df_src.empty or len(smart_columns) != len(df_src.columns):
+                            # 若結構完全錯亂，重新以基礎模式讀取
+                            df_src = pd.read_excel(io.BytesIO(file_bytes), header=header_row)
+                        else:
+                            df_src.columns = smart_columns
+
+                        # 進行欄位標準化對齊
+                        rename_dict = {}
+                        for col in df_src.columns:
+                            col_clean = str(col).strip()
+                            if col_clean in ["名稱", "品名", "商品名稱", "中文", "中文品名", "品名規格", "Description"]: rename_dict[col] = "名稱"
+                            elif col_clean in ["條碼", "國際條碼", "EAN", "Barcode", "BARCODE", "條碼型號", "JAN CODE"]: rename_dict[col] = "條碼"
+                            elif col_clean in ["零售價", "建議售價", "單價", "定價", "售價", "Price"]: rename_dict[col] = "零售價"
+                            elif col_clean in ["商品編號", "貨號", "產品編號", "Item No", "ITEM"]: rename_dict[col] = "商品編號"
+                            elif col_clean in ["內盒", "Inner", "INNER"]: rename_dict[col] = "內盒"
+                            elif col_clean in ["CTN", "外箱", "箱入數", "Carton", "外箱數"]: rename_dict[col] = "CTN"
+                            elif col_clean in ["CTN訂購含稅價", "CTN含稅價", "CTN含稅", "外箱含稅價", "外箱進價"]: rename_dict[col] = "CTN含稅"
+                            elif col_clean in ["內盒訂購含稅價", "內盒含稅價", "內盒含稅", "內盒進價", "含稅", "含稅價", "進價"]: rename_dict[col] = "含稅"
+                        df_src = df_src.rename(columns=rename_dict)
+                        
+                        # 3. 無條碼欄位檢查與派送
+                        if "條碼" not in df_src.columns:
+                            no_barcode_count += 1
+                            upload_to_gdrive_folder(file_bytes, filename, FOLDER_NO_BARCODE)
+                            continue
+                            
+                        # 4. 條碼格式終極清洗
+                        df_src['條碼'] = df_src['條碼'].apply(clean_barcode)
+                        
+                        # 開始逐列勾稽比對
+                        for _, src_row in df_src.dropna(subset=['條碼']).iterrows():
+                            barcode = str(src_row['條碼'])
+                            if barcode in ["", "0"]: continue
+                            
+                            price = round(float(src_row.get('零售價', 0)), 2) if pd.notna(src_row.get('零售價', 0)) else 0
+                            name = str(src_row.get('名稱', '')).strip()
+                            
+                            match_found = False
+                            need_insert = False
+                            remark_note = ""
+                            display_barcode = barcode
+
+                            # 5. 異常條碼重複勾稽與「雙向審核標記」
+                            if barcode in master_dict:
+                                match_found = True
+                                master_row = master_dict[barcode]
+                                target_uid = master_row.get('UID', '未知')
+                                m_name = str(master_row.get('名稱', '')).strip()
+                                
+                                try: 
+                                    m_price = float(master_row.get('零售價', 0)) if pd.notna(master_row.get('零售價', 0)) else 0
+                                except: 
+                                    m_price = 0
+                                
+                                # 名稱不同 -> 紅色異常
+                                if name and m_name != name: 
+                                    need_insert = True
+                                    anomaly_count += 1
+                                    remark_note = f"與 UID: {target_uid} 條碼重複, 名稱不同"
+                                    display_barcode = f"🔴 {barcode}"
+                                # 售價不同 -> 綠色異常
+                                elif price > 0 and m_price != price: 
+                                    need_insert = True
+                                    anomaly_count += 1
+                                    remark_note = f"與 UID: {target_uid} 條碼重複, 名稱相同, 零售價不同"
+                                    display_barcode = f"🟢 {barcode}"
+                            
+                            # 執行寫入 (全新或有衝突變更)
+                            if (not match_found) or (match_found and need_insert):
+                                # 6. 雲端 UID 歷史流水號繼承機制
+                                current_max_uid += 1
+                                new_uid = f"UID-{int(current_max_uid):06d}"
+                                
+                                row_data = {col: "" for col in df_total.columns if col != 'move'}
+                                for col in df_src.columns:
+                                    if col in row_data:
+                                        val = src_row[col]
+                                        row_data[col] = "" if pd.isna(val) else val
+                                
+                                row_data["UID"] = new_uid
+                                row_data["條碼"] = display_barcode
+                                row_data["名稱"] = name
+                                if "零售價" in row_data: row_data["零售價"] = price
+                                row_data["備註"] = remark_note
+                                row_data["匯入檔名"] = filename
+                                
+                                new_rows.append(row_data)
+                                
+                                # 將新項目加入字典，避免同批次檔案內自我重複
+                                master_dict[barcode] = row_data
+
+                        # 處理成功，派送歸檔至「已匯入」資料夾並紀錄 MD5
+                        upload_to_gdrive_folder(file_bytes, filename, FOLDER_IMPORTED)
+                        history_records.append({"檔案名稱": filename, "md5": file_md5, "匯入時間": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+                        history_md5_list.append(file_md5)
+                        success_count += 1
+                        
+                    except Exception as e:
+                        st.error(f"❌ 檔案 【{filename}】 解析失敗: {str(e)}")
+                        upload_to_gdrive_folder(file_bytes, filename, FOLDER_NO_BARCODE)
+                        no_barcode_count += 1
                     
-                    for _, src_row in df_src.dropna(subset=['條碼']).iterrows():
-                        barcode = str(src_row['條碼'])
-                        if barcode in ["", "0", "nan", "None"]: continue
-                        price = round(float(src_row.get('零售價', 0)), 2) if pd.notna(src_row.get('零售價', 0)) else 0
-                        name = str(src_row.get('名稱', '')).strip()
-                        match_found = False
-                        need_insert = False
-                        if barcode in master_dict:
-                            match_found = True
-                            master_row = master_dict[barcode]
-                            if name and str(master_row['名稱']).strip() != name: need_insert = True
-                            else:
-                                try: m_price = float(master_row['零售價']) if (pd.notna(master_row['零售價']) and str(master_row['零售價']).strip() != "") else 0
-                                except: m_price = 0
-                                if price > 0 and m_price != price: need_insert = True
-                        if (not match_found) or (match_found and need_insert):
-                            current_max_uid += 1
-                            new_uid = f"UID-{current_max_uid:06d}"
-                            row_data = {col: "" for col in df_total.columns if col != 'move'}
-                            for col in df_src.columns:
-                                if col in row_data:
-                                    val = src_row[col]
-                                    row_data[col] = "" if pd.isna(val) else val
-                            row_data["UID"] = new_uid
-                            row_data["條碼"] = barcode
-                            row_data["名稱"] = name
-                            if "零售價" in row_data: row_data["零售價"] = price
-                            row_data["備註"] = ""
-                            row_data["匯入檔名"] = file.name
-                            new_rows.append(row_data)
-                    history_records.append({"檔案名稱": file.name, "md5": file_md5, "匯入時間": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
-                    success_count += 1
-                except Exception as e:
-                    st.error(f"❌ 解析失敗: {str(e)}")
-                    
+            # 整合回寫雲端資料庫
             if new_rows: df_total = pd.concat([df_total, pd.DataFrame(new_rows)], ignore_index=True)
             if history_records: df_history = pd.concat([df_history, pd.DataFrame(history_records)], ignore_index=True)
             
             df_meta.iloc[0, 0] = current_max_uid
+            # 確保新資料也經過總表交叉清洗標記
             df_total = run_cross_matching(df_total)
             
             if save_to_master_xlsm({"麗嬰國際產品總表": df_total, "已匯入採購單": df_history, "metadata": df_meta}):
                 load_master_data.clear()
-                get_cached_gdrive_id.clear()
-                # 💡 關鍵：設定 Session 訊息後刷新頁面，下次載入時就會立刻在最上方呈現快捷按鈕！
-                st.session_state['merge_success_msg'] = f"🎉 成功完成歸檔與雲端同步寫入！順利處理 {success_count} 份檔案。 (跳過重複檔: {dup_count})"
+                
+                # 組裝詳細的執行報告
+                report_msg = f"🎉 成功完成雲端同步！\n\n✅ 成功匯入: {success_count} 份\n🔁 跳過重複檔: {dup_count} 份\n⚠️ 缺失條碼/結構錯亂: {no_barcode_count} 份"
+                if anomaly_count > 0:
+                    report_msg += f"\n\n🚨 注意：本次匯入發現 **{anomaly_count}** 筆異常衝突商品，已自動為您加上 🔴 🟢 標記於備註欄！"
+                
+                st.session_state['merge_success_msg'] = report_msg
                 st.rerun()
 
     st.write("---")
     st.subheader("⚠️ 條碼重複與衝突即時審核控制台")
-    # ... 審核控制台後續邏輯完全不變 ...
+    # --- 下方審核控制台邏輯維持不變 ---
     if not df_total.empty:
         if 'move' in df_total.columns: df_total = df_total.drop(columns=['move'])
         df_total.insert(0, 'move', False)
         df_total['move'] = df_total['move'].astype(bool)
-        is_duplicate_barcode = df_total.duplicated(subset=['條碼'], keep=False) & (~df_total['條碼'].isin(["", "0", "nan", "None"]))
-        df_anomaly = df_total[is_duplicate_barcode].sort_values(by=['條碼', 'UID']).copy()
+        
+        # 使用清洗後的條碼進行精準重複比對
+        df_total['條碼_乾淨'] = df_total['條碼'].astype(str).str.replace('🔴 ', '').str.replace('🟢 ', '').str.strip()
+        is_duplicate_barcode = df_total.duplicated(subset=['條碼_乾淨'], keep=False) & (~df_total['條碼_乾淨'].isin(["", "0", "nan", "None"]))
+        
+        df_anomaly = df_total[is_duplicate_barcode].sort_values(by=['條碼_乾淨', 'UID']).copy()
+        df_anomaly = df_anomaly.drop(columns=['條碼_乾淨'], errors='ignore')
+        df_total = df_total.drop(columns=['條碼_乾淨'], errors='ignore')
         
         if not df_anomaly.empty:
             def inject_emoji_alerts(row):
                 remark = str(row.get('備註', ''))
                 barcode = str(row.get('條碼', ''))
                 if "名稱不同" in remark and not barcode.startswith("🔴"): row['條碼'] = f"🔴 {barcode}"
-                elif "零售價different" in remark or ("零售價不同" in remark and not barcode.startswith("🟢")): row['條碼'] = f"🟢 {barcode}"
+                elif "零售價不同" in remark and not barcode.startswith("🟢"): row['條碼'] = f"🟢 {barcode}"
                 return row
             df_anomaly = df_anomaly.apply(inject_emoji_alerts, axis=1)
             
@@ -800,19 +928,28 @@ elif sub_page == "⚖️ 麗嬰商品表合併和與審核":
                     df_delete_log = pd.concat([df_delete_log, df_to_delete], ignore_index=True)
                     
                     if save_to_master_xlsm({"麗嬰國際產品總表": df_remaining, "刪除紀錄": df_delete_log}):
-                        load_master_data.clear() # 優化：更新後清空快取
-                        get_cached_gdrive_id.clear()
+                        load_master_data.clear() 
                         st.session_state['merge_success_msg'] = "🧹 移轉封存與自訂 Note 備註已完整同步寫入雲端主資料庫！"
                         st.rerun()
                 else:
                     df_remaining_only = run_cross_matching(df_total.drop(columns=['move'], errors='ignore'))
                     if save_to_master_xlsm({"麗嬰國際產品總表": df_remaining_only, "刪除紀錄": df_delete_log}):
-                        load_master_data.clear() # 優化：更新後清空快取
-                        get_cached_gdrive_id.clear()
+                        load_master_data.clear() 
                         st.session_state['merge_success_msg'] = "📝 自訂 Note 備註內容已順利同步更新至雲端主資料庫！"
                         st.rerun()
         else:
             st.success("🟢 當前總表中沒有任何重複商品的衝突。")
+
+    if 'merge_success_msg' in st.session_state:
+        st.success(st.session_state['merge_success_msg'])
+        st.markdown("### ⚡ 歸檔後後續自動化推薦操作")
+        st.info("💡 採購單已成功存入麗嬰總表！直接點擊下方按鈕， PowerQuery 整合並自動更新雲端統整表。")
+        if st.button("🚀 三表資料整合並自動回寫更新至雲端『商品蝦皮麗嬰價格統整表』", type="primary", use_container_width=True):
+            with st.spinner("⏳ 正在跨資料庫調閱核心數據、執行大數據 VLOOKUP 計算並回寫雲端..."):
+                if run_powerquery_and_update_gdrive():
+                    st.success("🎯 狂賀！三表整合『商品蝦皮麗嬰價格統整表』已在雲端同步覆寫更新完畢！")
+                    del st.session_state['merge_success_msg']
+        st.write("---")
 
 # -------------------------------------------------------------------------
 # 子功能 5：📈 蝦皮商品清單轉換
