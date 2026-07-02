@@ -431,8 +431,8 @@ def run_powerquery_and_update_gdrive():
             
         df_final["麗嬰零售八折"] = df_final["麗嬰零售價"] * 0.8
         df_final["麗嬰八折比蝦皮貴"] = df_final.apply(lambda r: "v" if (pd.notna(r["麗嬰零售八折"]) and pd.notna(r["蝦皮售價"]) and r["麗嬰零售八折"] > r["蝦皮售價"]) else None, axis=1)
-        df_final["麗嬰未稅價"] = df_final["麗嬰批發含稅價"].apply(lambda x: round(x / 1.05) if pd.notna(x) else None)
-        df_final["麗嬰稅款"] = df_final.apply(lambda r: round(r["麗嬰批發含稅價"] - r["麗嬰未稅價"]) if (pd.notna(r["麗嬰批發含稅價"]) and pd.notna(r["麗嬰未稅價"])) else None, axis=1)
+        df_final["麗嬰未稅價"] = df_final["麗嬰批發含稅價"].apply(lambda x: round(x / 1.05, 2) if pd.notna(x) else None)
+        df_final["麗嬰稅款"] = df_final.apply(lambda r: round(r["麗嬰批發含稅價"] - r["麗嬰未稅價"], 2) if (pd.notna(r["麗嬰批發含稅價"]) and pd.notna(r["麗嬰未稅價"])) else None, axis=1)
         
         # 清除不必要的欄位並寫入全域狀態（供預覽與下載使用）
         df_pq_final = df_final.drop(columns=["iSKU"], errors="ignore")
@@ -551,8 +551,8 @@ elif sub_page == "🧠 PowerQuery 執行三表整合":
                         
                     df_final["麗嬰零售八折"] = df_final["麗嬰零售價"] * 0.8
                     df_final["麗嬰八折比蝦皮貴"] = df_final.apply(lambda r: "v" if (pd.notna(r["麗嬰零售八折"]) and pd.notna(r["蝦皮售價"]) and r["麗嬰零售八折"] > r["蝦皮售價"]) else None, axis=1)
-                    df_final["麗嬰未稅價"] = df_final["麗嬰批發含稅價"].apply(lambda x: round(x / 1.05) if pd.notna(x) else None)
-                    df_final["麗嬰稅款"] = df_final.apply(lambda r: round(r["麗嬰批發含稅價"] - r["麗嬰未稅價"]) if (pd.notna(r["麗嬰批發含稅價"]) and pd.notna(r["麗嬰未稅價"])) else None, axis=1)
+                    df_final["麗嬰未稅價"] = df_final["麗嬰批發含稅價"].apply(lambda x: round(x / 1.05, 2) if pd.notna(x) else None)
+                    df_final["麗嬰稅款"] = df_final.apply(lambda r: round(r["麗嬰批發含稅價"] - r["麗嬰未稅價"], 2) if (pd.notna(r["麗嬰批發含稅價"]) and pd.notna(r["麗嬰未稅價"])) else None, axis=1)
                     
                     # 將結果存入 pq_result 機制
                     st.session_state['pq_result'] = df_final.drop(columns=["iSKU"], errors="ignore")
