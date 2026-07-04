@@ -1124,8 +1124,8 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
                                     sal_raw = match_row.get('麗嬰批發含稅價',None)
                                     c_raw = match_row.get('麗嬰未稅價', None)
                                     t_raw = match_row.get('麗嬰稅款', None)
-                                    cost_val = float(c_raw) if pd.notna(c_raw) else None
-                                    tax_val = float(t_raw) if pd.notna(t_raw) else None
+                                    cost_val = round(float(c_raw), 2) if pd.notna(c_raw) else None
+                                    tax_val = round(float(t_raw), 2) if pd.notna(t_raw) else None
                                     or_val = float(or_raw) if pd.notna(or_raw) else None
                                     sal_val = float(sal_raw) if pd.notna(sal_raw) else None
 
