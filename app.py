@@ -115,6 +115,11 @@ def download_gdrive_file_to_bytes(file_id):
     file_stream.seek(0)
     return file_stream
 
+@st.cache_data(ttl=600, show_spinner="☁️ 正在從雲端載入檔案...")
+def get_cached_gdrive_file_bytes(file_id):
+    """快取雲端檔案的 Bytes 內容，避免頻繁切換分頁或查詢時重複發起網路下載"""
+    return download_gdrive_file_to_bytes(file_id)
+
 def upload_or_update_gdrive_file(folder_id, file_name, file_bytes, existing_file_id=None):
     """【強制覆寫優化版】一律不允許機器人 Create 新檔案，強制執行 Update 覆寫"""
     media = MediaIoBaseUpload(
@@ -595,32 +600,77 @@ elif sub_page == "🧠 PowerQuery 執行三表整合":
                             st.info("💡 重新整理頁面後，上方將會顯示最新的修改時間。")
                         
 # -------------------------------------------------------------------------
-# 子功能 3：🔍 麗嬰商品總表數據查詢 (新增多筆條碼批次查詢功能)
+# 子功能 3：🔍 麗嬰商品總表數據查詢 (支援條碼、庫存SKU多筆查詢與 Calamine 加速)
 # -------------------------------------------------------------------------
 elif sub_page == "🔍 麗嬰商品總表數據查詢":
     st.subheader("📋 麗嬰採購產品總表資料庫分頁動態檢視")
     
-    # 延遲載入 metadata，避免全域耗能
     _, _, _, _, all_sheets, _ = load_master_data(ID_MASTER_FILE)
     
     if all_sheets:
         view_sheets = [s for s in all_sheets if s != "麗嬰產品新採購單"]
         selected_sheet = st.selectbox("請選擇數據分頁：", view_sheets)
         
-        # ── 🌟 新增功能：切換查詢模式 ──
-        search_mode = st.radio("🎯 請選擇查詢模式：", ["多筆條碼價格查詢", "模糊關鍵字搜尋"], horizontal=True)
+        search_mode = st.radio("🎯 請選擇查詢模式：", ["多筆條碼價格查詢", "多筆庫存SKU查詢", "模糊關鍵字搜尋"], horizontal=True)
         
         try:
-            # 使用 calamine 快速讀取預覽
+            # 💡 使用快取與 calamine 高速讀取
+            file_bytes = get_cached_gdrive_file_bytes(ID_MASTER_FILE)
             engine_kw = {"engine": "calamine"} if HAS_CALAMINE else {}
-            df_view = pd.read_excel(download_gdrive_file_to_bytes(ID_MASTER_FILE), selected_sheet, **engine_kw)
+            df_view = pd.read_excel(io.BytesIO(file_bytes), sheet_name=selected_sheet, **engine_kw)
             
-            # 確保條碼欄位格式乾淨（去除小數點與空白）
-            if "條碼" in df_view.columns:
-                df_view['條碼'] = df_view['條碼'].astype(str).str.strip().str.split('.').str[0]
+            # 模式 1：多筆條碼價格查詢
+            if search_mode == "多筆條碼價格查詢":
+                if "條碼" not in df_view.columns:
+                    st.warning(f"⚠️ 當前選擇的分頁 【{selected_sheet}】 內部不含「條碼」欄位。")
+                else:
+                    df_view['條碼'] = df_view['條碼'].apply(clean_barcode)
+                    barcode_paste = st.text_area("📋 請貼上多筆國際條碼 (換行、空格或逗號隔開)：", height=120, placeholder="例如：\n4711234567890\n4711234567891")
+                    
+                    if barcode_paste.strip():
+                        import re
+                        cleaned_barcodes = [clean_barcode(t) for t in re.split(r'[\n,\s]+', barcode_paste) if t.strip()]
+                        cleaned_barcodes = [b for b in cleaned_barcodes if b]
+                        
+                        if cleaned_barcodes:
+                            df_result = df_view[df_view['條碼'].isin(cleaned_barcodes)].copy()
+                            st.success(f"🔍 查詢完畢！成功比對出 {len(df_result)} 筆商品資料。")
+                            
+                            important_cols = ["條碼", "名稱", "零售價", "含稅"]
+                            display_cols = [c for c in important_cols if c in df_result.columns] + [c for c in df_result.columns if c not in important_cols]
+                            st.dataframe(df_result[display_cols], use_container_width=True)
+                            
+                            towrite_query = io.BytesIO()
+                            with pd.ExcelWriter(towrite_query, engine='openpyxl') as writer:
+                                df_result[display_cols].to_excel(writer, index=False, sheet_name="條碼查詢結果")
+                            st.download_button("📥 下載本次條碼查詢結果報表 (.xlsx)", data=towrite_query.getvalue(), file_name=f"條碼批次查詢結果_{datetime.date.today().strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             
-            # ── 模式 1：原本的模糊關鍵字搜尋 ──
-            if search_mode == "模糊關鍵字搜尋":
+            # 模式 2：多筆庫存SKU查詢 (新增功能)
+            elif search_mode == "多筆庫存SKU查詢":
+                # 自動尋找可能代表庫存SKU的欄位名稱 (如 自定義編碼 或 庫存SKU)
+                sku_col_candidate = next((c for c in ["庫存SKU", "自定義編碼", "商品編號", "貨號"] if c in df_view.columns), None)
+                
+                if not sku_col_candidate:
+                    st.warning(f"⚠️ 當前選擇的分頁 【{selected_sheet}】 找不到對應的 SKU 欄位。")
+                else:
+                    df_view[sku_col_candidate] = df_view[sku_col_candidate].astype(str).str.strip().str.split('.').str[0]
+                    sku_paste = st.text_area(f"📋 請貼上多筆【{sku_col_candidate}】（換行、空格或逗號隔開）：", height=120, placeholder="例如：\nSKU001\nSKU002")
+                    
+                    if sku_paste.strip():
+                        import re
+                        cleaned_skus = [t.strip() for t in re.split(r'[\n,\s]+', sku_paste) if t.strip()]
+                        if cleaned_skus:
+                            df_result = df_view[df_view[sku_col_candidate].isin(cleaned_skus)].copy()
+                            st.success(f"🔍 查詢完畢！成功比對出 {len(df_result)} 筆商品資料。")
+                            st.dataframe(df_result, use_container_width=True)
+                            
+                            towrite_query = io.BytesIO()
+                            with pd.ExcelWriter(towrite_query, engine='openpyxl') as writer:
+                                df_result.to_excel(writer, index=False, sheet_name="SKU查詢結果")
+                            st.download_button("📥 下載本次SKU查詢結果報表 (.xlsx)", data=towrite_query.getvalue(), file_name=f"SKU批次查詢結果_{datetime.date.today().strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+            # 模式 3：模糊關鍵字搜尋
+            elif search_mode == "模糊關鍵字搜尋":
                 search_term = st.text_input("🔍 快速搜尋關鍵字 (支援條碼、品名、貨號模糊比對)：", placeholder="輸入搜尋內容...")
                 st.metric(label=f"📊 【{selected_sheet}】當前總資料筆數", value=f"{len(df_view)} 筆")
                 
@@ -629,59 +679,9 @@ elif sub_page == "🔍 麗嬰商品總表數據查詢":
                     st.dataframe(df_view[search_mask], use_container_width=True)
                 else:
                     st.dataframe(df_view, use_container_width=True)
-            
-            # ── 模式 2：🚀 全新功能 - 多筆條碼價格查詢 ──
-            elif search_mode == "多筆條碼價格查詢":
-                if "條碼" not in df_view.columns:
-                    st.warning(f"⚠️ 當前選擇的分頁 【{selected_sheet}】 內部不含「條碼」欄位，無法使用此查詢模式。")
-                else:
-                    barcode_paste = st.text_area(
-                        "📋 請貼上多筆國際條碼 (支援從 Excel 複製直接貼上，或以換行、空格、逗號隔開)：",
-                        height=120,
-                        placeholder="範例：\n4711234567890\n4711234567891"
-                    )
                     
-                    if barcode_paste.strip():
-                        # 解析使用者輸入的條碼列表（清洗空白、換行、逗號）
-                        raw_barcodes = barcode_paste.replace(',', ' ').replace('\t', ' ').split()
-                        cleaned_barcodes = [str(b).strip().split('.')[0] for b in raw_barcodes if b.strip()]
-                        
-                        if cleaned_barcodes:
-                            # 使用 Pandas isin 進行高效比對
-                            df_result = df_view[df_view['條碼'].isin(cleaned_barcodes)].copy()
-                            
-                            # 動態回報搜尋統計
-                            found_count = len(df_result)
-                            input_count = len(set(cleaned_barcodes)) # 去重後的輸入條碼數
-                            
-                            st.success(f"🔍 查詢完畢！您輸入了 {input_count} 筆不重複條碼，成功比對出 {found_count} 筆商品資料。")
-                            
-                            # 挑選核心售價相關欄位置前顯示（如果欄位存在的話）
-                            important_cols = ["條碼", "名稱", "零售價", "含稅"]
-                            display_cols = [c for c in important_cols if c in df_result.columns] + \
-                                           [c for c in df_result.columns if c not in important_cols]
-                            
-                            st.dataframe(df_result[display_cols], use_container_width=True)
-                            
-                            # 提供獨立的查詢結果下載按鈕
-                            towrite_query = io.BytesIO()
-                            with pd.ExcelWriter(towrite_query, engine='openpyxl') as writer:
-                                df_result[display_cols].to_excel(writer, index=False, sheet_name="條碼查詢結果")
-                            
-                            st.download_button(
-                                label="📥 下載本次條碼查詢結果報表 (.xlsx)",
-                                data=towrite_query.getvalue(),
-                                file_name=f"條碼批次查詢結果_{datetime.date.today().strftime('%Y%m%d')}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                            )
-                        else:
-                            st.info("💡 請輸入有效的條碼。")
-                    else:
-                        st.info("💡 請在上方文字方塊中貼上欲查詢的條碼。")
-                        
         except Exception as e:
             st.error(f"❌ 讀取分頁數據失敗: {str(e)}")
-
 # -------------------------------------------------------------------------
 # 子功能 4：⚖️ 麗嬰商品表合併和與審核 
 # -------------------------------------------------------------------------
@@ -1261,21 +1261,55 @@ elif sub_page == "📜 sitegiant 歷史入庫單紀錄":
             except Exception as e: st.error(f"❌ 讀取失敗: {str(e)}")
 
 # -------------------------------------------------------------------------
-# 子功能 8：🔍 商品清單紀錄查詢
+# 子功能 8：🔍 商品清單紀錄查詢 (支援自定義編碼與 c 欄位多筆查詢)
 # -------------------------------------------------------------------------
 elif sub_page == "🔍 商品清單紀錄查詢":
     st.subheader("📊 歷史商品清單紀錄查詢")
     hist_files = list_gdrive_files(ID_PROD_FOLDER)
-    if not hist_files: st.warning(f"💡 目前雲端無歷史單據。")
+    if not hist_files: 
+        st.warning(f"💡 目前雲端無歷史單據。")
     else:
         file_options = {f['name']: f['id'] for f in hist_files}
-        selected_hist_file = st.selectbox("🎯 商品清單紀錄:", list(file_options.keys()))
+        selected_hist_file = st.selectbox("🎯 選擇商品清單紀錄檔案：", list(file_options.keys()))
+        
         if selected_hist_file:
             try:
                 target_id = file_options[selected_hist_file]
-                file_bytes = download_gdrive_file_to_bytes(target_id)
-                df_hist_view = pd.read_excel(file_bytes, engine="calamine" if HAS_CALAMINE else None)
-                st.markdown(f"📄 **當前雲端檔案**：`{selected_hist_file}` ｜ 📊 **iSKU品項數**：`{len(df_hist_view)} 筆`")
-                st.dataframe(df_hist_view, use_container_width=True)
-                st.download_button(label="🔄 下載此歷史商品清單", data=file_bytes.getvalue(), file_name=selected_hist_file, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-            except Exception as e: st.error(f"❌ 讀取失敗: {str(e)}")
+                # 💡 導入快取與 calamine 高速讀取
+                file_bytes = get_cached_gdrive_file_bytes(target_id)
+                engine_kw = {"engine": "calamine"} if HAS_CALAMINE else {}
+                df_hist_view = pd.read_excel(io.BytesIO(file_bytes), **engine_kw)
+                
+                st.markdown(f"📄 **當前雲端檔案**：`{selected_hist_file}` ｜ 📊 **iSKU總品項數**：`{len(df_hist_view)} 筆`")
+                st.write("---")
+                
+                # ── 🌟 新增：多筆批次查詢區塊 ──
+                st.markdown("#### 🔎 多筆批次編碼查詢")
+                col_m, col_i = st.columns([1, 3])
+                with col_m:
+                    target_col = st.radio("選擇查詢依據欄位：", options=["自定義編碼", "c"], index=0)
+                with col_i:
+                    batch_input = st.text_area(f"請輸入多筆【{target_col}】（每筆請以換行、逗號或空格隔開）：", height=100, placeholder="例如：\n240101\n240102")
+                
+                df_display = df_hist_view.copy()
+                if batch_input.strip() and target_col in df_display.columns:
+                    import re
+                    search_terms = [t.strip() for t in re.split(r'[\n,\s]+', batch_input) if t.strip()]
+                    df_display[target_col] = df_display[target_col].astype(str).str.strip().str.split('.').str[0]
+                    df_display = df_display[df_display[target_col].isin(search_terms)]
+                    st.info(f"🎯 批次篩選結果：找到 **{len(df_display)}** 筆符合資料。")
+                
+                st.dataframe(df_display, use_container_width=True)
+                
+                towrite_prod = io.BytesIO()
+                with pd.ExcelWriter(towrite_prod, engine='openpyxl') as writer:
+                    df_display.to_excel(writer, index=False, sheet_name="商品清單查詢結果")
+                
+                st.download_button(
+                    label="🔄 下載此歷史商品清單 (或篩選結果)", 
+                    data=towrite_prod.getvalue(), 
+                    file_name=selected_hist_file, 
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            except Exception as e: 
+                st.error(f"❌ 讀取失敗: {str(e)}")
