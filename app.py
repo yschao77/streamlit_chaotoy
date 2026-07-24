@@ -117,8 +117,9 @@ def download_gdrive_file_to_bytes(file_id):
 
 @st.cache_data(ttl=600, show_spinner="☁️ 正在從雲端載入檔案...")
 def get_cached_gdrive_file_bytes(file_id):
-    """快取雲端檔案的 Bytes 內容，避免頻繁切換分頁或查詢時重複發起網路下載"""
-    return download_gdrive_file_to_bytes(file_id)
+    """快取雲端檔案的純 Bytes 內容，確保 Streamlit 快取安全且避免重複下載"""
+    file_stream = download_gdrive_file_to_bytes(file_id)
+    return file_stream.getvalue()  # 💡 加上 .getvalue()，將串流轉化為純 bytes！
 
 def upload_or_update_gdrive_file(folder_id, file_name, file_bytes, existing_file_id=None):
     """【強制覆寫優化版】一律不允許機器人 Create 新檔案，強制執行 Update 覆寫"""
