@@ -1113,7 +1113,7 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
                             match = df_ref[df_ref['c_clean'] == barcode_input]
                             if not match.empty:
                                 match_row = match.iloc[0]
-                                prod_name = match_row.get('品名', match_row.get('名稱', ''))
+                                prod_name = match_row.get('蝦皮商品名稱', match_row.get('名稱', ''))
                                 sku = match_row.get('自定義編碼', '')
                                 sku_final = sku if pd.notna(sku) and str(sku).strip() != "" else "⚠️ 提示：須新增iSKU"
                                 category = match_row.get('分類定義', '')
