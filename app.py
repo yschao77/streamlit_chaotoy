@@ -425,7 +425,7 @@ def run_powerquery_and_update_gdrive():
         df_s["iSKU"] = df_s["iSKU"].astype(str).str.strip().str.split('.').str[0]
         
         # 3. 模擬 PowerQuery 進行多表 Merge 關聯
-        df_merge1 = pd.merge(df_p, df_s[["iSKU", "GTIN", "價格"]], left_on="自定義編碼", right_on="iSKU", how="left").rename(columns={"GTIN": "蝦皮GTIN", "價格": "蝦皮售價"})
+        df_merge1 = pd.merge(df_p, df_s[["商品名稱","iSKU", "GTIN", "價格"]], left_on="自定義編碼", right_on="iSKU", how="left").rename(columns={"商品名稱": "蝦皮商品名稱", "GTIN": "蝦皮GTIN", "價格": "蝦皮售價"})
         df_merge1["c"] = df_merge1["c"].astype(str).str.strip().str.split('.').str[0]
         
         df_final = pd.merge(df_merge1, df_liying[["條碼", "零售價", "含稅"]], left_on="c", right_on="條碼", how="left").rename(columns={"零售價": "麗嬰零售價", "含稅": "麗嬰批發含稅價", "條碼": "麗嬰條碼"})
