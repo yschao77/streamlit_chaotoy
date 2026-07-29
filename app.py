@@ -700,9 +700,32 @@ elif sub_page == "🔍 麗嬰商品總表數據查詢":
 elif sub_page == "⚖️ 麗嬰商品表合併和與審核":
     st.subheader("🧸 麗嬰採購單一鍵導入與審核系統")
     
-    # 讀取主檔 (請確保您的 Excel 中已將 '已匯入採購單' 重新命名為 '已處理採購單')
-    df_total, df_history, df_delete_log, df_meta, _, current_max_uid = load_master_data(ID_MASTER_FILE)
-    if df_total is None: st.stop()
+    # 讀取主檔 
+    try:
+        # 1. 檢查檔案 ID 是否存在
+        if not ID_MASTER_FILE:
+            st.error("❌ 錯誤：未設定雲端主資料庫 ID (ID_MASTER_FILE)！請檢查 Streamlit Secrets 或設定檔。")
+            st.stop()
+
+        # 2. 呼叫讀取函式
+        master_data_result = load_master_data(ID_MASTER_FILE)
+
+        # 3. 驗證回傳結果是否正常 (防呆判斷)
+        if master_data_result is None or not isinstance(master_data_result, (tuple, list)):
+            st.error("❌ 讀取雲端主資料庫失敗：無法從 Google Drive 載入資料，請確認 Service Account 權限與檔案 ID 是否正確。")
+            st.stop()
+
+        # 4. 解構賦值
+        df_total, df_history, df_delete_log, df_meta, _, current_max_uid = master_data_result
+
+        # 5. 確保核心 Dataframe 載入成功
+        if df_total is None:
+            st.error("❌ 讀取失敗：主資料庫內容 (df_total) 為空或無法正常解析，請檢查 Excel 工作表名稱與格式！")
+            st.stop()
+
+    except Exception as e:
+        st.error(f"❌ 讀取雲端主資料庫時發生未預期的例外錯誤：{str(e)}")
+        st.stop()
 
     # 若歷史表單中尚未建立 "狀態" 欄位，先進行初始化防錯
     if "狀態" not in df_history.columns:
