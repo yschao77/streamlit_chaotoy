@@ -976,7 +976,7 @@ elif sub_page == "📈 蝦皮商品清單轉換":
     # 延遲載入蝦皮快取
     df_shopee_history, df_shopee_current_list = load_shopee_data(ID_SHOPEE_MASTER)
 
-    uploaded_shopee = st.file_uploader("📥 上傳新的蝦皮商品清單原始報表 (.xlsx) 進行格式校正：", type=["xlsx"], key="main_shopee_upload")
+    uploaded_shopee = st.file_uploader("📥 上傳新的蝦皮商品清單原始報表 (.xlsx/.xls/.xlsm) 進行格式校正：", type=["xlsx", "xls", "xlsm"], key="main_shopee_upload")
     if uploaded_shopee:
         file_bytes = uploaded_shopee.read()
         shopee_md5 = calculate_md5(file_bytes)
