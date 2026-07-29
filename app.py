@@ -1015,26 +1015,19 @@ elif sub_page == "📈 蝦皮商品清單轉換":
                     df_gtin_keep = df_gtin_check[~df_gtin_check['GTIN_str'].isin(["", "00", "0", "nan"])].sort_values(by=['GTIN_str', '價格', 'original_index']).drop_duplicates(subset=['GTIN_str'], keep='last')
                     df_final_clean = pd.concat([df_gtin_keep, df_gtin_check[df_gtin_check['GTIN_str'].isin(["", "00", "0", "nan"])]]).sort_values(by='original_index')
                                      
-                    out_buf_sp = io.BytesIO()
-                    df_final_clean.to_excel(out_buf_sp, index=False)
+                    # 🗑️ 刪除這裡原本的 out_buf_sp = io.BytesIO() 與 upload_or_update_gdrive_file，這是造成 NPE 的元凶！
                     
-                    # ── 🟢 修正：強制只更新現有的「蝦皮賣場商品列表.xlsm」主表 ──
-                    if ID_SHOPEE_MASTER:
-                        upload_or_update_gdrive_file(ID_SHOPEE_FOLDER, "蝦皮賣場商品列表.xlsm", out_buf_sp.getvalue(), existing_file_id=ID_SHOPEE_MASTER)
-                    else:
-                        st.error("❌ 雲端找不到變數 `ID_SHOPEE_MASTER` 對應的現有主檔案 ID，無法執行覆寫更新。")
-                        st.stop()
-                    
+                    # 📝 只需要保留歷史紀錄與下方正確的 save_to_shopee_master_xlsm 呼叫
                     new_hist_log = pd.DataFrame([{"檔案名稱": uploaded_shopee.name, "md5": shopee_md5, "匯入時間": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}])
                     df_shopee_history = pd.concat([df_shopee_history, new_hist_log], ignore_index=True)
                     
+                    # 🟢 使用全域的安全寫入函數 (會自動處理 keep_vba=True 並呼叫 update API)
                     if save_to_shopee_master_xlsm({"蝦皮商品列表": df_final_clean, "匯入檔案": df_shopee_history}):
                         load_shopee_data.clear() 
                         get_cached_gdrive_id.clear()
                         st.session_state['shopee_clean'] = df_final_clean
                         st.success(f"🎉 蝦皮賣場商品列表iSKU結構校正完成！\n🟢 雲端現有主表 `蝦皮賣場商品列表.xlsm` 已成功同步覆寫更新！")
                         
-                        # ── 🌟 新增：讓蝦皮校正完也能原地一鍵觸發更新統整表 ──
                         st.markdown("---")
                         st.markdown("### ⚡ 後續自動化推薦操作")
                         if st.button("🚀 馬上更新：以最新校正的蝦皮資料重新執行三表整合並回寫雲端", type="primary", use_container_width=True):
