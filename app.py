@@ -122,15 +122,26 @@ def get_cached_gdrive_file_bytes(file_id):
     return file_stream.getvalue()  # 💡 加上 .getvalue()，將串流轉化為純 bytes！
 
 def upload_or_update_gdrive_file(folder_id, file_name, file_bytes, existing_file_id=None):
-    """【強制覆寫優化版】一律不允許機器人 Create 新檔案，強制執行 Update 覆寫"""
+    """【強制覆寫優化版】動態判斷 mimetype，避免 Google Drive 鎖定檔案"""
+    
+    # 💡 1. 根據附檔名動態判定正確的 MIME Type
+    file_name_str = str(file_name).lower()
+    if file_name_str.endswith('.xlsm'):
+        mime_type = 'application/vnd.ms-excel.sheet.macroEnabled.12'
+    elif file_name_str.endswith('.xls'):
+        mime_type = 'application/vnd.ms-excel'
+    else:
+        mime_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        
+    # 2. 封裝上傳內容
     media = MediaIoBaseUpload(
         io.BytesIO(file_bytes), 
-        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 
+        mimetype=mime_type, 
         resumable=True
     )
     
     if existing_file_id:
-        # 🟢 只准執行 Update，並加入雙重防呆參數
+        # 🟢 只准執行 Update，並維持原檔案擁有者權限
         service.files().update(
             fileId=existing_file_id, 
             media_body=media, 
@@ -138,8 +149,8 @@ def upload_or_update_gdrive_file(folder_id, file_name, file_bytes, existing_file
         ).execute()
         return existing_file_id
     else:
-        # 🔴 防呆攔截：阻斷任何可能引發 0GB 空間配額爆炸的 create 行為
-        st.error(f"❌ 拒絕建立新檔案【{file_name}】！為避免 Google 空間配額錯誤，請先手動於雲端建立該空白檔案，並將 ID 配置於系統中。")
+        # 🔴 防呆攔截：阻斷 Create 行為
+        st.error(f"❌ 拒絕建立新檔案【{file_name}】！為避免 Google 空間配額與權限錯誤，請先手動於雲端建立該檔案。")
         st.stop()
 
 def format_gdrive_time(time_str):
