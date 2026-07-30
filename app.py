@@ -400,7 +400,7 @@ else:
     st.sidebar.markdown("### 🌐 sitegiant 電商整合管理")
     sub_page = st.sidebar.radio(
         "請選擇執行項目：",
-        ["🔀 sitegiant 採購入庫單格式轉換", "📜 sitegiant 歷史入庫單紀錄"],
+        ["🔀 sitegiant 採購入庫單格式轉換", "📜 sitegiant 歷史入庫單紀錄", "📦 SiteGiant 批量新增UPC"],
         index=0
     )
 
@@ -1341,3 +1341,109 @@ elif sub_page == "🔍 商品清單紀錄查詢":
                 )
             except Exception as e: 
                 st.error(f"❌ 讀取失敗: {str(e)}")
+# -------------------------------------------------------------------------
+# 子功能 9：📦 SiteGiant 批量新增UPC
+# -------------------------------------------------------------------------
+elif sub_page == "📦 SiteGiant 批量新增UPC":
+    st.subheader("📦 SiteGiant 批量新增UPC")
+    
+    # 顯示前置條件與後續操作
+    with st.expander("📌 點擊查看操作流程與前/後置條件", expanded=True):
+        st.markdown("""
+        ### 📝 前置條件
+        1. **確認 iSKU 對應 UPC**。
+        2. **下載 Sitegiant 批量編輯 UPC 檔案**：
+           - 至 Sitegiant 庫存列表 ➔ [批量編輯](https://sitegiant.co/items/batch-edit) UPC ➔ 下載 Excel。
+           - 檔案命名格式通常為：`batch_edit_item_upc_assignment_all_DD-MM-YYYY-fileID`。
+        3. **確認蝦皮賣場列表已校正**：
+           - 需先執行過本系統的「蝦皮賣場商品列表iSKU結構校正」。
+           - 本系統將自動調用雲端最新的校正表作為 UPC 比對資料庫。
+
+        ### 🚀 後續操作
+        - 將下方處理完畢並下載的新 Excel 檔案，上傳回 [Sitegiant 批量編輯](https://sitegiant.co/items/batch-edit) 覆蓋即可。
+        """)
+
+    # 1. 系統自動載入最新的蝦皮商品總表做為 VLOOKUP 的資料源
+    df_shopee_hist, df_shopee_list = load_shopee_data(ID_SHOPEE_MASTER)
+
+    if df_shopee_list.empty:
+        st.error("❌ 無法從雲端讀取蝦皮商品列表！請先前往「蝦皮商品清單轉換」執行校正並回寫雲端。")
+    else:
+        st.info("✅ 系統已自動從雲端載入最新的蝦皮商品列表，準備好進行 UPC 交叉比對！")
+        
+        # 2. 讓使用者上傳從 Sitegiant 下載下來的原始檔
+        uploaded_sg_file = st.file_uploader("📥 請上傳 Sitegiant UPC 批量編輯下載檔 (.xlsx/.xls)", type=["xlsx", "xls"])
+        
+        if uploaded_sg_file:
+            if st.button("⚡ 執行自動比對並填補 UPC", type="primary", use_container_width=True):
+                with st.spinner("⏳ 正在自動比對蝦皮資料庫並填入缺失的 UPC..."):
+                    try:
+                        # 讀取 Sitegiant 檔案
+                        df_sg = pd.read_excel(uploaded_sg_file)
+                        
+                        # 智慧判斷 Sitegiant 的欄位名稱 (支援中英文後台匯出格式)
+                        sg_sku_col = next((c for c in ["Item SKU", "商品 SKU", "SKU"] if c in df_sg.columns), None)
+                        sg_upc_col = next((c for c in ["UPC", "國際條碼（UPC）", "國際條碼"] if c in df_sg.columns), None)
+                        sg_main_col = next((c for c in ["Is Main UPC", "主要"] if c in df_sg.columns), None)
+                        
+                        if not sg_sku_col or not sg_upc_col:
+                            st.error("❌ 檔案解析失敗：在您上傳的檔案中找不到對應的 SKU 或 UPC 欄位。")
+                        else:
+                            # 處理蝦皮資料，確保 GTIN 是乾淨的字串 (去除空值、#N/A、00)
+                            df_shopee_list['iSKU'] = df_shopee_list['iSKU'].astype(str).str.strip()
+                            df_shopee_list['GTIN_str'] = df_shopee_list['GTIN'].astype(str).str.strip().str.split('.').str[0]
+                            valid_shopee = df_shopee_list[~df_shopee_list['GTIN_str'].isin(["", "00", "0", "nan", "#N/A", "None", "空白"])]
+                            
+                            # 建立字典映射 (iSKU -> GTIN)，完美取代 Excel 的 VLOOKUP
+                            upc_map = dict(zip(valid_shopee['iSKU'], valid_shopee['GTIN_str']))
+                            
+                            updated_count = 0
+                            
+                            # 進行資料列更新
+                            for idx, row in df_sg.iterrows():
+                                sku = str(row[sg_sku_col]).strip()
+                                current_upc = str(row[sg_upc_col]).strip()
+                                
+                                # 條件：篩選沒有 UPC 的商品
+                                if current_upc in ["", "nan", "None", "0", "00"]:
+                                    # 如果在蝦皮對照表中找到這個 iSKU
+                                    if sku in upc_map:
+                                        # 填入查出的 UPC
+                                        df_sg.at[idx, sg_upc_col] = upc_map[sku]
+                                        
+                                        # 該列欄位 "主要"，填寫 "是" / "Yes"
+                                        if sg_main_col:
+                                            df_sg.at[idx, sg_main_col] = "是" if "主要" in sg_main_col else "Yes"
+                                        
+                                        updated_count += 1
+                            
+                            # 儲存至 Session State 以供預覽與下載
+                            st.session_state['sg_upc_updated_df'] = df_sg
+                            st.session_state['sg_upc_updated_count'] = updated_count
+                            st.success(f"🎉 處理完成！共成功自動填補了 **{updated_count}** 筆缺少 UPC 的資料。")
+                            
+                    except Exception as e:
+                        st.error(f"❌ 處理檔案時發生錯誤：{str(e)}")
+                        st.info("💡 請確認上傳的 Sitegiant 檔案格式與欄位名稱是否正確。")
+
+        # 3. 提供結果預覽與檔案下載
+        if 'sg_upc_updated_df' in st.session_state:
+            df_result = st.session_state['sg_upc_updated_df']
+            
+            st.markdown("### 📋 處理結果預覽")
+            st.dataframe(df_result, use_container_width=True)
+            
+            towrite_sg = io.BytesIO()
+            with pd.ExcelWriter(towrite_sg, engine='openpyxl') as writer:
+                df_result.to_excel(writer, index=False)
+                
+            download_filename = f"batch_edit_upc_completed_{datetime.date.today().strftime('%Y%m%d')}.xlsx"
+            
+            st.download_button(
+                label=f"📥 下載已填補 UPC 的 Sitegiant 檔案",
+                data=towrite_sg.getvalue(),
+                file_name=download_filename,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary",
+                use_container_width=True
+            )
