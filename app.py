@@ -1371,17 +1371,20 @@ elif sub_page == "📦 SiteGiant 批量新增UPC":
     else:
         st.info("✅ 系統已自動從雲端載入最新的蝦皮商品列表，準備好進行 UPC 交叉比對！")
         
-        # 2. 讓使用者上傳從 Sitegiant 下載下來的原始檔
-        uploaded_sg_file = st.file_uploader("📥 請上傳 Sitegiant UPC 批量編輯下載檔 (.xlsx/.xls)", type=["xlsx", "xls"])
+        # 2. 讓使用者上傳從 Sitegiant 下載下來的原始檔 (新增 csv 支援)
+        uploaded_sg_file = st.file_uploader("📥 請上傳 Sitegiant UPC 批量編輯下載檔 (.xlsx/.xls/.csv)", type=["xlsx", "xls", "csv"])
         
         if uploaded_sg_file:
             if st.button("⚡ 執行自動比對並填補 UPC", type="primary", use_container_width=True):
                 with st.spinner("⏳ 正在自動比對蝦皮資料庫並填入缺失的 UPC..."):
                     try:
-                        # 讀取 Sitegiant 檔案
-                        df_sg = pd.read_excel(uploaded_sg_file)
+                        # 💡 修正 1：動態判斷讀取方式 (支援 CSV 與 Excel)
+                        if uploaded_sg_file.name.lower().endswith('.csv'):
+                            df_sg = pd.read_csv(uploaded_sg_file, dtype=str) # 強制用字串讀取避免掉 0
+                        else:
+                            df_sg = pd.read_excel(uploaded_sg_file, dtype=str)
                         
-                        # 智慧判斷 Sitegiant 的欄位名稱 (支援中英文後台匯出格式)
+                        # 智慧判斷 Sitegiant 的欄位名稱
                         sg_sku_col = next((c for c in ["Item SKU", "商品 SKU", "SKU"] if c in df_sg.columns), None)
                         sg_upc_col = next((c for c in ["UPC", "國際條碼（UPC）", "國際條碼"] if c in df_sg.columns), None)
                         sg_main_col = next((c for c in ["Is Main UPC", "主要"] if c in df_sg.columns), None)
@@ -1389,27 +1392,36 @@ elif sub_page == "📦 SiteGiant 批量新增UPC":
                         if not sg_sku_col or not sg_upc_col:
                             st.error("❌ 檔案解析失敗：在您上傳的檔案中找不到對應的 SKU 或 UPC 欄位。")
                         else:
-                            # 處理蝦皮資料，確保 GTIN 是乾淨的字串 (去除空值、#N/A、00)
+                            # 處理蝦皮資料
                             df_shopee_list['iSKU'] = df_shopee_list['iSKU'].astype(str).str.strip()
                             df_shopee_list['GTIN_str'] = df_shopee_list['GTIN'].astype(str).str.strip().str.split('.').str[0]
                             valid_shopee = df_shopee_list[~df_shopee_list['GTIN_str'].isin(["", "00", "0", "nan", "#N/A", "None", "空白"])]
                             
-                            # 建立字典映射 (iSKU -> GTIN)，完美取代 Excel 的 VLOOKUP
-                            upc_map = dict(zip(valid_shopee['iSKU'], valid_shopee['GTIN_str']))
+                            # 💡 修正 2：建立雙重字典映射，防止 .TP17022 這種後綴導致比對失敗
+                            upc_map_exact = dict(zip(valid_shopee['iSKU'], valid_shopee['GTIN_str']))
+                            upc_map_split = dict(zip(valid_shopee['iSKU'].str.split('.').str[0], valid_shopee['GTIN_str']))
                             
                             updated_count = 0
                             
                             # 進行資料列更新
                             for idx, row in df_sg.iterrows():
                                 sku = str(row[sg_sku_col]).strip()
+                                sku_split = sku.split('.')[0] # 取小數點前的部分做備用比對
                                 current_upc = str(row[sg_upc_col]).strip()
                                 
                                 # 條件：篩選沒有 UPC 的商品
-                                if current_upc in ["", "nan", "None", "0", "00"]:
-                                    # 如果在蝦皮對照表中找到這個 iSKU
-                                    if sku in upc_map:
+                                if current_upc in ["", "nan", "None", "0", "00", "NaN"]:
+                                    
+                                    # 尋找對應的 UPC (先找完全符合，沒有再找去尾符合)
+                                    match_gtin = None
+                                    if sku in upc_map_exact:
+                                        match_gtin = upc_map_exact[sku]
+                                    elif sku_split in upc_map_split:
+                                        match_gtin = upc_map_split[sku_split]
+                                        
+                                    if match_gtin:
                                         # 填入查出的 UPC
-                                        df_sg.at[idx, sg_upc_col] = upc_map[sku]
+                                        df_sg.at[idx, sg_upc_col] = match_gtin
                                         
                                         # 該列欄位 "主要"，填寫 "是" / "Yes"
                                         if sg_main_col:
