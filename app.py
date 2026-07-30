@@ -1166,38 +1166,47 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
                                         # 指定要寫入的異常/待處理追蹤表 ID
                                         TARGET_SHEET_ID = "18KTllzCNejc5IKkGPsd5zpIBS5bmrUpHnPzJUnEJQW4"
                                         
-                                        # 準備要追加的一筆新資料行
+                                        # 💡 最終修正：子功能 6 是手動輸入單號，不是上傳檔案，所以用 order_no
+                                        current_order_name = order_no if 'order_no' in locals() and str(order_no).strip() else "手動輸入未命名單號"
+                                        
                                         new_row_data = {
-                                            "採購單檔名": f"sitegiant採購入庫單_{recv_date}_{current_vendor}_{current_order}.xlsx",
-                                            "國際條碼": barcode_input,
+                                            "採購單檔名": current_order_name,
+                                            "國際條碼": str(barcode_input).strip(),
+                                            "庫存SKU": str(sku_final).strip(),
                                             "狀態": "待處理",
                                             "建立時間": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                                         }
                                         
-                                        # 讀取現有的異常追蹤表
+                                        # 1. 嘗試讀取現有的異常追蹤表
                                         try:
                                             df_missing = pd.read_excel(download_gdrive_file_to_bytes(TARGET_SHEET_ID), sheet_name=0, dtype=str)
                                         except Exception:
                                             df_missing = pd.DataFrame(columns=["採購單檔名", "國際條碼", "庫存SKU", "狀態", "建立時間"])
                                             
-                                        # 避免重複寫入相同的條碼
-                                        if barcode_input not in df_missing["國際條碼"].values:
+                                        df_missing.columns = df_missing.columns.astype(str).str.strip()
+                                        
+                                        # 2. 檢查條碼是否重複
+                                        existing_barcodes = df_missing["國際條碼"].astype(str).str.strip().values if "國際條碼" in df_missing.columns else []
+                                        
+                                        if str(barcode_input).strip() not in existing_barcodes:
                                             df_new_row = pd.DataFrame([new_row_data])
                                             df_missing = pd.concat([df_missing, df_new_row], ignore_index=True)
                                             
-                                            # 將更新後的 DataFrame 寫回 Google Drive
+                                            # 3. 轉為二進位並寫回
                                             output_stream = io.BytesIO()
                                             with pd.ExcelWriter(output_stream, engine='openpyxl') as writer:
                                                 df_missing.to_excel(writer, index=False, sheet_name="待處理未知商品")
                                             output_stream.seek(0)
                                             
-                                            # 覆寫更新該檔案
+                                            # 4. 覆寫更新
                                             upload_or_update_gdrive_file(
                                                 folder_id=None,
-                                                file_name="蝦皮尚未建立商品.xlsx",
+                                                file_name="異常待處理商品清單.xlsx",
                                                 file_bytes=output_stream.getvalue(),
                                                 existing_file_id=TARGET_SHEET_ID
                                             )
+                                            st.toast(f"🚨 已自動將未知商品 [{barcode_input}] 記錄至雲端異常清單！", icon="⚠️")
+                                            
                                     except Exception as log_err:
                                         print(f"⚠️ 自動記錄未知商品失敗: {str(log_err)}")
                             
