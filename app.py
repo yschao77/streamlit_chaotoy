@@ -1159,50 +1159,7 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
                                     prod_name = str(internal_name).strip()
                                 else:
                                     prod_name = "⚠️ 未知商品名稱"
-                                    # ── 當判定為未知商品名稱時，自動寫入異常追蹤總表 ──
-                                    if prod_name == "⚠️ 未知商品名稱":
-                                        try:
-                                            # 指定要寫入的異常/待處理追蹤表 ID
-                                            TARGET_SHEET_ID = "18KTllzCNejc5IKkGPsd5zpIBS5bmrUpHnPzJUnEJQW4"
-        
-                                            # 準備要追加的一筆新資料行
-                                            new_row_data = {
-                                            "採購單檔名": f"sitegiant採購入庫單_{recv_date}_{current_vendor}_{current_order}.xlsx",
-                                            "國際條碼": barcode_input,
-                                            "庫存SKU": sku_final,
-                                            "狀態": "待處理",
-                                            "建立時間": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                            }
-        
-                                            # 讀取現有的異常追蹤表
-                                            try:
-                                                df_missing = pd.read_excel(download_gdrive_file_to_bytes(TARGET_SHEET_ID), sheet_name=0, dtype=str)
-                                            except Exception:
-                                                # 如果表是空的或讀取失敗，初始化一個新的 DataFrame
-                                                df_missing = pd.DataFrame(columns=["採購單檔名", "國際條碼", "庫存SKU", "狀態", "建立時間"])
-            
-                                            # 避免重複寫入相同的條碼
-                                            if barcode_input not in df_missing["國際條碼"].values:
-                                                df_new_row = pd.DataFrame([new_row_data])
-                                                df_missing = pd.concat([df_missing, df_new_row], ignore_index=True)
-            
-                                                # 將更新後的 DataFrame 寫回 Google Drive
-                                                output_stream = io.BytesIO()
-                                                with pd.ExcelWriter(output_stream, engine='openpyxl') as writer:
-                                                    df_missing.to_excel(writer, index=False, sheet_name="待處理未知商品")
-                                                output_stream.seek(0)
-            
-                                                # 覆寫更新該檔案
-                                                upload_or_update_gdrive_file(
-                                                    folder_id=None, # 若已知檔案ID，可直接更新
-                                                    file_name="蝦皮尚未建立商品.xlsx",
-                                                    file_bytes=output_stream.getvalue(),
-                                                    existing_file_id=TARGET_SHEET_ID
-                                                )
-                                        except Exception as log_err:
-                                            # 寫入失敗時不影響主程式運作，僅在背景印出提示
-                                            print(f"⚠️ 自動記錄未知商品失敗: {str(log_err)}")
-                                
+                                                                    
                                 # 💡 原本的 SKU 與其他欄位抓取維持不變
                                 sku = match_row.get('自定義編碼', '')
                                 sku_final = sku if pd.notna(sku) and str(sku).strip() not in ["", "nan", "None"] else "⚠️ 提示：須新增iSKU"
@@ -1231,7 +1188,53 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
                                     tax_val = round(t_val, 2) if t_val is not None else None
                                     or_val = safe_float(or_raw)
                                     sal_val = round(s_val, 2) if s_val is not None else None
+                                
+                                # ── 當判定為未知商品名稱時，自動寫入異常追蹤總表 ──
+                                  if prod_name == "⚠️ 未知商品名稱":
+                                      try:
+                                          # 指定要寫入的異常/待處理追蹤表 ID
+                                          TARGET_SHEET_ID = "18KTllzCNejc5IKkGPsd5zpIBS5bmrUpHnPzJUnEJQW4"
+        
+                                          # 準備要追加的一筆新資料行
+                                          new_row_data = {
+                                          "採購單檔名": f"sitegiant採購入庫單_{recv_date}_{current_vendor}_{current_order}.xlsx",
+                                          "國際條碼": barcode_input,
+                                          "庫存SKU": sku_final,
+                                          "狀態": "待處理",
+                                          "建立時間": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                          }
+        
+                                          # 讀取現有的異常追蹤表
+                                          try:
+                                              df_missing = pd.read_excel(download_gdrive_file_to_bytes(TARGET_SHEET_ID), sheet_name=0, dtype=str)
+                                          except Exception:
+                                              # 如果表是空的或讀取失敗，初始化一個新的 DataFrame
+                                              df_missing = pd.DataFrame(columns=["採購單檔名", "國際條碼", "庫存SKU", "狀態", "建立時間"])
+            
+                                            # 避免重複寫入相同的條碼
+                                          if barcode_input not in df_missing["國際條碼"].values:
+                                              df_new_row = pd.DataFrame([new_row_data])
+                                              df_missing = pd.concat([df_missing, df_new_row], ignore_index=True)
+            
+                                               # 將更新後的 DataFrame 寫回 Google Drive
+                                              output_stream = io.BytesIO()
+                                              with pd.ExcelWriter(output_stream, engine='openpyxl') as writer:
+                                                  df_missing.to_excel(writer, index=False, sheet_name="待處理未知商品")
+                                              output_stream.seek(0)
+            
+                                               # 覆寫更新該檔案
+                                               upload_or_update_gdrive_file(
+                                                  folder_id=None, # 若已知檔案ID，可直接更新
+                                                  file_name="蝦皮尚未建立商品.xlsx",
+                                                  file_bytes=output_stream.getvalue(),
+                                                  existing_file_id=TARGET_SHEET_ID
+                                               )
+                                        except Exception as log_err:
+                                            # 寫入失敗時不影響主程式運作，僅在背景印出提示
+                                            print(f"⚠️ 自動記錄未知商品失敗: {str(log_err)}")
+                            
 
+                            
                         result_rows.append({
                             "收貨日": str(recv_date), "國際條碼": barcode_input,
                             "庫存SKU": sku_final, "庫存貨品名稱": prod_name, 
