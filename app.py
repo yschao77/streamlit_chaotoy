@@ -1190,12 +1190,12 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
                                             output_stream.seek(0)
           
                                              # 覆寫更新該檔案
-                                             upload_or_update_gdrive_file(
+                                            upload_or_update_gdrive_file(
                                                 folder_id=None, # 若已知檔案ID，可直接更新
                                                 file_name="蝦皮尚未建立商品.xlsx",
                                                 file_bytes=output_stream.getvalue(),
                                                 existing_file_id=TARGET_SHEET_ID
-                                             )
+                                            )
                                     except Exception as log_err:
                                             # 寫入失敗時不影響主程式運作，僅在背景印出提示
                                             print(f"⚠️ 自動記錄未知商品失敗: {str(log_err)}")
