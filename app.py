@@ -1199,9 +1199,9 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
                                                     file_bytes=output_stream.getvalue(),
                                                     existing_file_id=TARGET_SHEET_ID
                                                 )
-                                       except Exception as log_err:
-                                        # 寫入失敗時不影響主程式運作，僅在背景印出提示
-                                        print(f"⚠️ 自動記錄未知商品失敗: {str(log_err)}")
+                                        except Exception as log_err:
+                                            # 寫入失敗時不影響主程式運作，僅在背景印出提示
+                                            print(f"⚠️ 自動記錄未知商品失敗: {str(log_err)}")
                                 
                                 # 💡 原本的 SKU 與其他欄位抓取維持不變
                                 sku = match_row.get('自定義編碼', '')
