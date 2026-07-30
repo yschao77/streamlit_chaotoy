@@ -1387,8 +1387,8 @@ elif sub_page == "📦 SiteGiant 批量新增UPC":
                         # 💡 關鍵修正 1：強制清除所有標題欄位前後的隱藏空白與換行，避免比對失敗
                         df_sg.columns = df_sg.columns.astype(str).str.strip().str.replace('\n', '')
                         
-                        # 智慧判斷 Sitegiant 的欄位名稱 (增加全小寫防呆)
-                        sg_sku_col = next((c for c in ["Item SKU", "商品 SKU", "SKU", "Item Sku", "item sku"] if c in df_sg.columns), None)
+                        # 智慧判斷 Sitegiant 的欄位名稱 (加入「庫存SKU」)
+                        sg_sku_col = next((c for c in ["Item SKU", "商品 SKU", "SKU", "Item Sku", "item sku", "庫存SKU"] if c in df_sg.columns), None)
                         sg_upc_col = next((c for c in ["UPC", "國際條碼（UPC）", "國際條碼", "upc"] if c in df_sg.columns), None)
                         sg_main_col = next((c for c in ["Is Main UPC", "主要"] if c in df_sg.columns), None)
                         
