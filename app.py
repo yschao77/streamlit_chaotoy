@@ -1405,45 +1405,61 @@ elif sub_page == "📦 SiteGiant 批量新增UPC":
                             
                             upc_map_exact = dict(zip(valid_shopee['iSKU'], valid_shopee['GTIN_str']))
                                                     
-                            updated_count = 0
+                            # 紀錄成功填補的索引 index
+                            updated_indices = []
                             
+                            # 逐筆比對與填補
                             for idx, row in df_sg.iterrows():
                                 sku = str(row[sg_sku_col]).strip()
                                 current_upc = str(row[sg_upc_col]).strip()
                                 
+                                # 判斷是否缺少 UPC
                                 if current_upc in ["", "nan", "None", "0", "00", "NaN"]:
-                                    match_gtin = None
+                                    # 僅進行精準比對
                                     if sku in upc_map_exact:
                                         match_gtin = upc_map_exact[sku]
                                         
-                                    if match_gtin:
+                                        # 填入 UPC
                                         df_sg.at[idx, sg_upc_col] = match_gtin
+                                        
+                                        # 自動將「主要」欄位設為 "是" 或 "Yes"
                                         if sg_main_col:
                                             df_sg.at[idx, sg_main_col] = "是" if "主要" in sg_main_col else "Yes"
-                                        updated_count += 1
+                                        
+                                        # 紀錄此筆為成功新增資料
+                                        updated_indices.append(idx)
                             
-                            st.session_state['sg_upc_updated_df'] = df_sg
-                            st.session_state['sg_upc_updated_count'] = updated_count
-                            st.success(f"🎉 處理完成！共成功自動填補了 **{updated_count}** 筆缺少 UPC 的資料。")
+                            # 💡 核心修改：僅保留成功填補 UPC 的資料列
+                            df_sg_filtered = df_sg.loc[updated_indices].reset_index(drop=True)
+                            
+                            # 存入 Session State 供前端展示與下載
+                            st.session_state['sg_upc_updated_df'] = df_sg_filtered
+                            st.session_state['sg_upc_updated_count'] = len(df_sg_filtered)
+                            
+                            if len(df_sg_filtered) > 0:
+                                st.success(f"🎉 處理完成！共成功自動填補 **{len(df_sg_filtered)}** 筆缺失的 UPC 資料。")
+                            else:
+                                st.warning("⚠️ 處理完成，但未找到任何可填補的缺失 UPC 資料。")
                             
                     except Exception as e:
                         st.error(f"❌ 處理檔案時發生錯誤：{str(e)}")
-                            
-        # 3. 提供結果預覽與檔案下載
-        if 'sg_upc_updated_df' in st.session_state:
+                        st.info("💡 請確認上傳的 SiteGiant 檔案格式與欄位內容。")
+
+        # 3. 提供結果預覽與匯出下載 (僅含有填補成功者)
+        if 'sg_upc_updated_df' in st.session_state and not st.session_state['sg_upc_updated_df'].empty:
             df_result = st.session_state['sg_upc_updated_df']
             
-            st.markdown("### 📋 處理結果預覽")
+            st.markdown(f"### 📋 成功新增 UPC 預覽（共 {len(df_result)} 筆）")
             st.dataframe(df_result, use_container_width=True)
             
             towrite_sg = io.BytesIO()
             with pd.ExcelWriter(towrite_sg, engine='openpyxl') as writer:
                 df_result.to_excel(writer, index=False)
                 
-            download_filename = f"batch_edit_upc_completed_{datetime.date.today().strftime('%Y%m%d')}.xlsx"
+            download_filename = f"batch_edit_upc_added_only_{datetime.date.today().strftime('%Y%m%d')}.xlsx"
             
             st.download_button(
-                label=f"📥 下載已填補 UPC 的 Sitegiant 檔案",
+                label=f"📥 下載包含 {len(df_result)} 筆成功自動填補的 SiteGiant 檔案",
                 data=towrite_sg.getvalue(),
                 file_name=download_filename,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
