@@ -1167,7 +1167,7 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
         
                                             # 準備要追加的一筆新資料行
                                             new_row_data = {
-                                            "採購單檔名": uploaded_file.name if 'uploaded_file' in locals() and uploaded_file else "未知檔案",
+                                            "採購單檔名": f"sitegiant採購入庫單_{recv_date}_{current_vendor}_{current_order}.xlsx",
                                             "國際條碼": barcode_input,
                                             "庫存SKU": sku_final,
                                             "狀態": "待處理",
