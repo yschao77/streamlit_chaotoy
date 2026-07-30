@@ -1378,41 +1378,42 @@ elif sub_page == "📦 SiteGiant 批量新增UPC":
             if st.button("⚡ 執行自動比對並填補 UPC", type="primary", use_container_width=True):
                 with st.spinner("⏳ 正在自動比對蝦皮資料庫並填入缺失的 UPC..."):
                     try:
-                        # 💡 修正 1：動態判斷讀取方式 (支援 CSV 與 Excel)
+                        # 動態判斷讀取方式
                         if uploaded_sg_file.name.lower().endswith('.csv'):
-                            df_sg = pd.read_csv(uploaded_sg_file, dtype=str) # 強制用字串讀取避免掉 0
+                            df_sg = pd.read_csv(uploaded_sg_file, dtype=str)
                         else:
                             df_sg = pd.read_excel(uploaded_sg_file, dtype=str)
                         
-                        # 智慧判斷 Sitegiant 的欄位名稱
-                        sg_sku_col = next((c for c in ["Item SKU", "商品 SKU", "SKU"] if c in df_sg.columns), None)
-                        sg_upc_col = next((c for c in ["UPC", "國際條碼（UPC）", "國際條碼"] if c in df_sg.columns), None)
+                        # 💡 關鍵修正 1：強制清除所有標題欄位前後的隱藏空白與換行，避免比對失敗
+                        df_sg.columns = df_sg.columns.astype(str).str.strip().str.replace('\n', '')
+                        
+                        # 智慧判斷 Sitegiant 的欄位名稱 (增加全小寫防呆)
+                        sg_sku_col = next((c for c in ["Item SKU", "商品 SKU", "SKU", "Item Sku", "item sku"] if c in df_sg.columns), None)
+                        sg_upc_col = next((c for c in ["UPC", "國際條碼（UPC）", "國際條碼", "upc"] if c in df_sg.columns), None)
                         sg_main_col = next((c for c in ["Is Main UPC", "主要"] if c in df_sg.columns), None)
                         
                         if not sg_sku_col or not sg_upc_col:
-                            st.error("❌ 檔案解析失敗：在您上傳的檔案中找不到對應的 SKU 或 UPC 欄位。")
+                            # 💡 關鍵修正 2：如果找不到，直接把系統讀到的欄位名稱印出來抓漏！
+                            st.error("❌ 檔案解析失敗：找不到對應的 SKU 或 UPC 欄位。")
+                            st.warning(f"🕵️ 系統實際讀取到的所有欄位名稱為：\n`{list(df_sg.columns)}`")
+                            st.info("💡 【除錯建議】：\n1. 請打開檔案確認，**標題列是否確實位於第一行**（若上方有空白列請先刪除）。\n2. 若您看到的欄位名稱與我們預設的不同，請告訴我，我們把它加入清單中！")
                         else:
-                            # 處理蝦皮資料
+                            # --- 下方原本的正常處理邏輯維持不變 ---
                             df_shopee_list['iSKU'] = df_shopee_list['iSKU'].astype(str).str.strip()
                             df_shopee_list['GTIN_str'] = df_shopee_list['GTIN'].astype(str).str.strip().str.split('.').str[0]
                             valid_shopee = df_shopee_list[~df_shopee_list['GTIN_str'].isin(["", "00", "0", "nan", "#N/A", "None", "空白"])]
                             
-                            # 💡 修正 2：建立雙重字典映射，防止 .TP17022 這種後綴導致比對失敗
                             upc_map_exact = dict(zip(valid_shopee['iSKU'], valid_shopee['GTIN_str']))
                             upc_map_split = dict(zip(valid_shopee['iSKU'].str.split('.').str[0], valid_shopee['GTIN_str']))
                             
                             updated_count = 0
                             
-                            # 進行資料列更新
                             for idx, row in df_sg.iterrows():
                                 sku = str(row[sg_sku_col]).strip()
-                                sku_split = sku.split('.')[0] # 取小數點前的部分做備用比對
+                                sku_split = sku.split('.')[0]
                                 current_upc = str(row[sg_upc_col]).strip()
                                 
-                                # 條件：篩選沒有 UPC 的商品
                                 if current_upc in ["", "nan", "None", "0", "00", "NaN"]:
-                                    
-                                    # 尋找對應的 UPC (先找完全符合，沒有再找去尾符合)
                                     match_gtin = None
                                     if sku in upc_map_exact:
                                         match_gtin = upc_map_exact[sku]
@@ -1420,24 +1421,18 @@ elif sub_page == "📦 SiteGiant 批量新增UPC":
                                         match_gtin = upc_map_split[sku_split]
                                         
                                     if match_gtin:
-                                        # 填入查出的 UPC
                                         df_sg.at[idx, sg_upc_col] = match_gtin
-                                        
-                                        # 該列欄位 "主要"，填寫 "是" / "Yes"
                                         if sg_main_col:
                                             df_sg.at[idx, sg_main_col] = "是" if "主要" in sg_main_col else "Yes"
-                                        
                                         updated_count += 1
                             
-                            # 儲存至 Session State 以供預覽與下載
                             st.session_state['sg_upc_updated_df'] = df_sg
                             st.session_state['sg_upc_updated_count'] = updated_count
                             st.success(f"🎉 處理完成！共成功自動填補了 **{updated_count}** 筆缺少 UPC 的資料。")
                             
                     except Exception as e:
                         st.error(f"❌ 處理檔案時發生錯誤：{str(e)}")
-                        st.info("💡 請確認上傳的 Sitegiant 檔案格式與欄位名稱是否正確。")
-
+                            
         # 3. 提供結果預覽與檔案下載
         if 'sg_upc_updated_df' in st.session_state:
             df_result = st.session_state['sg_upc_updated_df']
