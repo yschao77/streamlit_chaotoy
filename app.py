@@ -1146,22 +1146,48 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
                             match = df_ref[df_ref['c_clean'] == barcode_input]
                             if not match.empty:
                                 match_row = match.iloc[0]
-                                prod_name = match_row.get('蝦皮商品名稱', match_row.get('名稱', ''))
+                                
+                                # 💡 修正 1：強健的名稱抓取邏輯 (防呆 NaN 與空白)
+                                shopee_name = match_row.get('蝦皮商品名稱', None)
+                                # 兼容抓取內部商品名稱或名稱
+                                internal_name = match_row.get('內部商品名稱', match_row.get('名稱', None)) 
+                                
+                                # 優先使用蝦皮名稱，若為空則使用內部名稱，再沒有則顯示提示
+                                if pd.notna(shopee_name) and str(shopee_name).strip() not in ["", "nan", "None"]:
+                                    prod_name = str(shopee_name).strip()
+                                elif pd.notna(internal_name) and str(internal_name).strip() not in ["", "nan", "None"]:
+                                    prod_name = str(internal_name).strip()
+                                else:
+                                    prod_name = "⚠️ 未知商品名稱"
+                                
+                                # 💡 原本的 SKU 與其他欄位抓取維持不變
                                 sku = match_row.get('自定義編碼', '')
-                                sku_final = sku if pd.notna(sku) and str(sku).strip() != "" else "⚠️ 提示：須新增iSKU"
+                                sku_final = sku if pd.notna(sku) and str(sku).strip() not in ["", "nan", "None"] else "⚠️ 提示：須新增iSKU"
                                 category = match_row.get('分類定義', '')
                                 keywords = match_row.get('產品關鍵字', '')
                             
-                                # ── ⚙️ 廠商判定邏輯：只有麗嬰才從總表抓成本與稅款，其餘維持 None ──
+                                # ── ⚙️ 廠商判定邏輯：只有麗嬰才從總表抓成本與稅款 ──
                                 if vendor_name == "麗嬰":
                                     or_raw = match_row.get('麗嬰零售價', None)
-                                    sal_raw = match_row.get('麗嬰批發含稅價',None)
+                                    sal_raw = match_row.get('麗嬰批發含稅價', None)
                                     c_raw = match_row.get('麗嬰未稅價', None)
                                     t_raw = match_row.get('麗嬰稅款', None)
-                                    cost_val = round(float(c_raw), 2) if pd.notna(c_raw) else None
-                                    tax_val = round(float(t_raw), 2) if pd.notna(t_raw) else None
-                                    or_val = float(or_raw) if pd.notna(or_raw) else None
-                                    sal_val = round(float(sal_raw), 2) if pd.notna(sal_raw) else None
+                                    
+                                    # 💡 加入安全轉換函式，徹底杜絕空白字串造成的 float() 當機
+                                    def safe_float(v):
+                                        try:
+                                            return float(str(v).replace(',', '').strip())
+                                        except (ValueError, TypeError):
+                                            return None
+
+                                    c_val = safe_float(c_raw)
+                                    t_val = safe_float(t_raw)
+                                    s_val = safe_float(sal_raw)
+                                    
+                                    cost_val = round(c_val, 2) if c_val is not None else None
+                                    tax_val = round(t_val, 2) if t_val is not None else None
+                                    or_val = safe_float(or_raw)
+                                    sal_val = round(s_val, 2) if s_val is not None else None
 
                         result_rows.append({
                             "收貨日": str(recv_date), "國際條碼": barcode_input,
@@ -1417,10 +1443,12 @@ elif sub_page == "📦 SiteGiant 批量新增UPC":
                             # 逐筆比對與填補
                             for idx, row in df_sg.iterrows():
                                 sku = str(row[sg_sku_col]).strip()
-                                current_upc = str(row[sg_upc_col]).strip()
                                 
-                                # 判斷是否缺少 UPC
-                                if current_upc in ["", "nan", "None", "0", "00", "NaN"]:
+                                # 💡 套用原本寫好的 clean_barcode 終極清洗，防止科學記號與空白
+                                current_upc = clean_barcode(row.get(sg_upc_col, ""))
+                                
+                                # 判斷是否缺少 UPC (現在 current_upc 已經非常乾淨)
+                                if current_upc in ["", "nan", "None", "0", "00"]:
                                     # 僅進行精準比對
                                     if sku in upc_map_exact:
                                         match_gtin = upc_map_exact[sku]
