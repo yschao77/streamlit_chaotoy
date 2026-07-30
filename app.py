@@ -1189,13 +1189,13 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
                                                 # 將更新後的 DataFrame 寫回 Google Drive
                                                 output_stream = io.BytesIO()
                                                 with pd.ExcelWriter(output_stream, engine='openpyxl') as writer:
-                                                df_missing.to_excel(writer, index=False, sheet_name="待處理未知商品")
+                                                    df_missing.to_excel(writer, index=False, sheet_name="待處理未知商品")
                                                 output_stream.seek(0)
             
                                                 # 覆寫更新該檔案
                                                 upload_or_update_gdrive_file(
                                                     folder_id=None, # 若已知檔案ID，可直接更新
-                                                    file_name="蝦皮尚未建立商品",
+                                                    file_name="蝦皮尚未建立商品.xlsx",
                                                     file_bytes=output_stream.getvalue(),
                                                     existing_file_id=TARGET_SHEET_ID
                                                 )
