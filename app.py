@@ -1404,21 +1404,17 @@ elif sub_page == "📦 SiteGiant 批量新增UPC":
                             valid_shopee = df_shopee_list[~df_shopee_list['GTIN_str'].isin(["", "00", "0", "nan", "#N/A", "None", "空白"])]
                             
                             upc_map_exact = dict(zip(valid_shopee['iSKU'], valid_shopee['GTIN_str']))
-                            upc_map_split = dict(zip(valid_shopee['iSKU'].str.split('.').str[0], valid_shopee['GTIN_str']))
-                            
+                                                    
                             updated_count = 0
                             
                             for idx, row in df_sg.iterrows():
                                 sku = str(row[sg_sku_col]).strip()
-                                sku_split = sku.split('.')[0]
                                 current_upc = str(row[sg_upc_col]).strip()
                                 
                                 if current_upc in ["", "nan", "None", "0", "00", "NaN"]:
                                     match_gtin = None
                                     if sku in upc_map_exact:
                                         match_gtin = upc_map_exact[sku]
-                                    elif sku_split in upc_map_split:
-                                        match_gtin = upc_map_split[sku_split]
                                         
                                     if match_gtin:
                                         df_sg.at[idx, sg_upc_col] = match_gtin
