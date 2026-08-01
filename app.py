@@ -1082,7 +1082,7 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
     # ── 1. 基本設定與資料輸入 ──
     col_input1, col_input2, col_input3 = st.columns([2, 2, 2])
     with col_input1:
-        recv_date = st.date_input("請選擇收貨日", datetime.date.today())
+        recv_date = st.date_input("請選擇銷貨日", datetime.date.today())
     with col_input2:
         vendor_name = st.selectbox("請選擇廠商名稱", ["麗嬰", "其他廠商..."])
     with col_input3:
@@ -1188,7 +1188,7 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
                                 })
 
                             result_rows.append({
-                                "收貨日": str(recv_date), "國際條碼": barcode_input,
+                                "銷貨日": str(recv_date), "國際條碼": barcode_input,
                                 "庫存SKU": sku_final, "庫存貨品名稱": prod_name, 
                                 "麗嬰零售價": or_val if vendor_name == "麗嬰" else None, 
                                 "麗嬰批發含稅價": sal_val if vendor_name == "麗嬰" else None,
