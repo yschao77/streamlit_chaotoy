@@ -1344,7 +1344,7 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
             disabled=["國際條碼","庫存SKU", "庫存貨品名稱", "數量", "麗嬰零售價"],
             column_config={
                 "麗嬰批發含稅價": st.column_config.NumberColumn(
-                    "成本", help="請手動輸入麗嬰批發含稅價", min_value=0.0, format="%.2f"
+                    "麗嬰批發含稅價", help="請手動輸入麗嬰批發含稅價", min_value=0.0, format="%.2f"
                 ),
                 "成本": st.column_config.NumberColumn(
                     "成本", help="請手動輸入未稅成本", min_value=0.0, format="%.2f"
