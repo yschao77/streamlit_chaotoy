@@ -1082,19 +1082,61 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
     # ── 1. 基本設定與資料輸入 ──
     col_input1, col_input2, col_input3 = st.columns([2, 2, 2])
     with col_input1:
-        recv_date = st.date_input("請選擇銷貨日", datetime.date.today())
+        recv_date = st.date_input("請選擇收貨日", datetime.date.today())
     with col_input2:
         vendor_name = st.selectbox("請選擇廠商名稱", ["麗嬰", "其他廠商..."])
     with col_input3:
         order_no = st.text_input("請輸入訂單/銷貨單號 (order_no)", value="")
 
-    st.markdown("📋 **請貼上採購入庫明細（需包含『國際條碼』與『數量』欄位）：**")
+    st.markdown("📋 **請輸入或貼上採購入庫明細：**")
     
+    # 💡 修復問題 2：預先建立 15 列空白資料，避免貼上時因為 0 列導致第一次貼上沒反應
     if 'inward_input_df' not in st.session_state:
-        st.session_state['inward_input_df'] = pd.DataFrame(columns=["國際條碼", "數量"])
-        
-    input_df = st.data_editor(st.session_state['inward_input_df'], num_rows="dynamic", use_container_width=True, key="inward_grid")
-    st.session_state['inward_input_df'] = input_df 
+        init_data = [{"國際條碼": "", "數量": None} for _ in range(15)]
+        st.session_state['inward_input_df'] = pd.DataFrame(init_data)
+
+    # 💡 修復問題 1：在渲染之前，自動清理歷史 state，刪除多餘的 "0" 欄位並恢復標準標題
+    curr_df = st.session_state['inward_input_df']
+    if "0" in curr_df.columns or len(curr_df.columns) != 2:
+        curr_df = curr_df.iloc[:, :2]
+        curr_df.columns = ["國際條碼", "數量"]
+        st.session_state['inward_input_df'] = curr_df
+
+    # 💡 提供兩種輸入模式（傳統表格與文字框快速貼上）
+    tab_editor, tab_paste = st.tabs(["📊 直接表格貼上 / 編輯", "📋 剪貼簿快速文字貼上 (推薦，最穩定)"])
+
+    with tab_editor:
+        input_df = st.data_editor(
+            st.session_state['inward_input_df'], 
+            num_rows="dynamic", 
+            use_container_width=True, 
+            key="inward_grid"
+        )
+        # 即時防護：若使用者貼上時又產生了多餘欄位，強制只保留前兩欄
+        if "0" in input_df.columns or len(input_df.columns) > 2:
+            input_df = input_df.iloc[:, :2]
+            input_df.columns = ["國際條碼", "數量"]
+        st.session_state['inward_input_df'] = input_df
+
+    with tab_paste:
+        pasted_text = st.text_area(
+            "請從 Excel 直接複製『國際條碼』與『數量』貼至下方框內：", 
+            height=120, 
+            placeholder="可以直接由 Excel 複製多行貼上，範例：\n4711234567890\t2\n4711234567891\t5"
+        )
+        if st.button("📥 解析並套用剪貼簿內容", use_container_width=True):
+            if pasted_text.strip():
+                try:
+                    # 使用 StringIO 自動解析 Tab 或空白分隔的 Excel 複製資料
+                    df_parsed = pd.read_csv(io.StringIO(pasted_text.strip()), sep=r'\s+|\t', engine='python', header=None, dtype=str)
+                    df_parsed = df_parsed.iloc[:, :2]
+                    df_parsed.columns = ["國際條碼", "數量"]
+                    
+                    st.session_state['inward_input_df'] = df_parsed
+                    st.success(f"✅ 成功解析 {len(df_parsed)} 筆資料！已同步更新至表格中。")
+                    st.rerun()
+                except Exception as parse_err:
+                    st.error(f"❌ 解析失敗，請確認複製內容格式是否正確：{parse_err}")
 
     st.write("")
     
