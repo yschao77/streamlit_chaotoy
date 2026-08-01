@@ -1258,9 +1258,24 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
                                     df_missing = pd.DataFrame(columns=["採購單檔名", "國際條碼", "狀況", "狀態", "建立時間"])
                                     
                                 df_missing.columns = df_missing.columns.astype(str).str.strip()
-                                existing_barcodes = df_missing["國際條碼"].astype(str).str.strip().values if "國際條碼" in df_missing.columns else []
                                 
-                                new_missing_items = [item for item in missing_items if item["國際條碼"] not in existing_barcodes]
+                                # 🌟 關鍵修改：同時組合「採購單檔名 + 國際條碼」作為唯一識別鍵 (Key)
+                                if "採購單檔名" in df_missing.columns and "國際條碼" in df_missing.columns:
+                                    existing_keys = set(
+                                        df_missing["採購單檔名"].astype(str).str.strip() + "_" + 
+                                        df_missing["國際條碼"].astype(str).str.strip()
+                                    )
+                                else:
+                                    existing_keys = set()
+                                
+                                # 篩選出「同一張單號中尚未被記錄過的條碼」
+                                new_missing_items = []
+                                for item in missing_items:
+                                    item_key = f"{item['採購單檔名']}_{item['國際條碼']}"
+                                    if item_key not in existing_keys:
+                                        new_missing_items.append(item)
+                                        # 同時把剛加入的 key 補進 範圍內，避免這次送出的清單裡自己重複
+                                        existing_keys.add(item_key)
                                 
                                 if new_missing_items:
                                     df_new_rows = pd.DataFrame(new_missing_items)
