@@ -1210,15 +1210,35 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
                         })
                         
                     # 💡 迴圈結束後，整批上傳至「尚未建立商品清單」
+                    # 💡 迴圈結束後，整批上傳至「尚未建立商品清單」
                     if missing_items:
                         try:
                             TARGET_SHEET_ID = "18KTllzCNejc5IKkGPsd5zpIBS5bmrUpHnPzJUnEJQW4"
                             
+                            # --- 🚀 修復覆蓋問題：加入原生 Google Sheet 與 Excel 雙軌下載機制 ---
                             try:
-                                df_missing = pd.read_excel(download_gdrive_file_to_bytes(TARGET_SHEET_ID), sheet_name=0, dtype=str)
+                                # 嘗試 1：假設它是原生的 Google 試算表，透過 export_media 導出為 Excel 格式
+                                request = service.files().export_media(fileId=TARGET_SHEET_ID, mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+                                file_stream = io.BytesIO()
+                                downloader = MediaIoBaseDownload(file_stream, request)
+                                done = False
+                                while done is False:
+                                    _, done = downloader.next_chunk()
+                                file_stream.seek(0)
+                                raw_bytes = file_stream
                             except Exception:
+                                # 嘗試 2：如果它已經是一般的 Excel (.xlsx) 檔案，使用標準二進位下載
+                                raw_bytes = download_gdrive_file_to_bytes(TARGET_SHEET_ID)
+
+                            # 使用 pandas 讀取並合併
+                            try:
+                                engine_kw = {"engine": "calamine"} if HAS_CALAMINE else {}
+                                df_missing = pd.read_excel(raw_bytes, sheet_name=0, dtype=str, **engine_kw)
+                            except Exception as read_err:
+                                st.warning(f"⚠️ 無法讀取現有雲端清單內容，將重新建立。（錯誤訊息: {read_err}）")
                                 # 包含新的「狀況」欄位
                                 df_missing = pd.DataFrame(columns=["採購單檔名", "國際條碼", "狀況", "狀態", "建立時間"])
+                            # -------------------------------------------------------------------------
                                 
                             df_missing.columns = df_missing.columns.astype(str).str.strip()
                             existing_barcodes = df_missing["國際條碼"].astype(str).str.strip().values if "國際條碼" in df_missing.columns else []
@@ -1227,22 +1247,23 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
                             
                             if new_missing_items:
                                 df_new_rows = pd.DataFrame(new_missing_items)
+                                # 💡 這裡就是新舊合併的關鍵！保留舊的 df_missing，加上新的 df_new_rows
                                 df_missing = pd.concat([df_missing, df_new_rows], ignore_index=True)
                                 
                                 output_stream = io.BytesIO()
                                 with pd.ExcelWriter(output_stream, engine='openpyxl') as writer:
-                                    # 更名為「尚未建立商品清單」
                                     df_missing.to_excel(writer, index=False, sheet_name="尚未建立商品清單")
                                 output_stream.seek(0)
                                 
                                 upload_or_update_gdrive_file(
                                     folder_id=None,
-                                    file_name="尚未建立商品清單.xlsx", # 更名為「尚未建立商品清單.xlsx」
+                                    file_name="尚未建立商品清單.xlsx", 
                                     file_bytes=output_stream.getvalue(),
                                     existing_file_id=TARGET_SHEET_ID
                                 )
                                 st.toast(f"🚨 已自動將 {len(new_missing_items)} 筆異常紀錄至雲端！", icon="⚠️")
                         except Exception as log_err:
+                            st.error(f"⚠️ 自動記錄異常商品失敗: {str(log_err)}")
                             print(f"⚠️ 自動記錄異常商品失敗: {str(log_err)}")
                             
                     if result_rows:
@@ -1251,7 +1272,7 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
                         st.session_state['current_order_no'] = order_no
                         # 💡 記錄此張單是否有異常，供後續改檔名使用
                         st.session_state['has_pending_items'] = len(missing_items) > 0 
-                        st.success(f"🚀 格式勾稽完成！廠商已設定為：【{vendor_name}】")
+                       # st.success(f"🚀 格式勾稽完成！廠商已設定為：【{vendor_name}】")
                         
                     # 💡 修正 2：在 for 迴圈「結束後」，一次性整批讀取並寫入雲端 (解決覆蓋問題)
                     if missing_items:
