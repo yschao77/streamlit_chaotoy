@@ -1082,7 +1082,7 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
     # ── 1. 基本設定與資料輸入 ──
     col_input1, col_input2, col_input3 = st.columns([2, 2, 2])
     with col_input1:
-        recv_date = st.date_input("請選擇收貨日", datetime.date.today())
+        recv_date = st.date_input("請選擇銷貨日期", datetime.date.today())
     with col_input2:
         vendor_name = st.selectbox("請選擇廠商名稱", ["麗嬰", "其他廠商..."])
     with col_input3:
@@ -1134,6 +1134,11 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
                     
                     st.session_state['inward_input_df'] = df_parsed
                     st.success(f"✅ 成功解析 {len(df_parsed)} 筆資料！已同步更新至表格中。")
+
+                    # 💡 新增這兩行：讓畫面暫停 1.5 秒，讓使用者能看清楚提示，再執行刷新
+                    import time
+                    time.sleep(1.5)
+                    
                     st.rerun()
                 except Exception as parse_err:
                     st.error(f"❌ 解析失敗，請確認複製內容格式是否正確：{parse_err}")
