@@ -1100,6 +1100,25 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
     
     # ── 2. 轉換執行按鈕 (放在輸入表格正下方) ──
     if st.button("✨ 執行貨品名稱和成本稅款導入並紀錄待處理商品", type="primary", use_container_width=True):
+        
+        # ==========================================
+        # 🛡️ 防呆機制：強制清理貼上的 DataFrame
+        # ==========================================
+        expected_cols = ["國際條碼", "數量"]
+        
+        # 1. 如果貼上時產生了多餘欄位，但標題沒壞，直接過濾保留這兩欄
+        if "國際條碼" in input_df.columns and "數量" in input_df.columns:
+            input_df = input_df[expected_cols]
+        else:
+            # 2. 最糟狀況：如果貼上時連標題都被洗掉了，強制抓取「前兩欄」並重新命名
+            # 這樣就算不小心貼歪，只要前兩欄是條碼跟數量就能救回來
+            input_df = input_df.iloc[:, :2]
+            input_df.columns = expected_cols
+
+        # 3. 移除因為貼上多餘空白而產生的「全空行」
+        input_df = input_df.dropna(how='all')
+        # ==========================================
+
         if not order_no.strip() or input_df.empty:
             st.error("❌ 轉換失敗！請填入銷貨單號與有效明細。")
         else:
