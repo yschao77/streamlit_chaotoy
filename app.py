@@ -1091,7 +1091,7 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
             vendor_name = selected_vendor
 
     with c_meta2:
-        recv_date = st.date_input("📅 選擇收貨日：", value=datetime.date.today())
+        recv_date = st.date_input("📅 選擇銷貨日期：", value=datetime.date.today())
         recv_date = recv_date.strftime("%y%m%d")
         
     st.write("---")
@@ -1129,15 +1129,16 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
                     df_ref['c_clean'] = df_ref['c'].astype(str).str.strip().str.split('.').str[0]
                         
                     result_rows = []
-                    missing_items = []  # 💡 新增：用來在迴圈中收集這批所有的未知商品
+                    missing_items = []  # 收集所有異常商品
                     
                     for row in input_df.itertuples(index=False):
                         barcode_input = str(row.國際條碼).strip().split('.')[0] if pd.notna(row.國際條碼) else ""
                         if barcode_input in ["", "0", "nan", "None"]: continue
                         qty = int(row.數量) if pd.notna(row.數量) else 0
                     
+                        # 預設狀態
                         sku_final = "⚠️ 提示：須新增iSKU"
-                        prod_name = "請確認商品列表和統整表是否已經更新"
+                        prod_name = "⚠️ 未知商品名稱" 
                         category = ""
                         keywords = ""
                         cost_val = None 
@@ -1156,22 +1157,11 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
                                     prod_name = str(shopee_name).strip()
                                 elif pd.notna(internal_name) and str(internal_name).strip() not in ["", "nan", "None"]:
                                     prod_name = str(internal_name).strip()
-                                else:
-                                    prod_name = "⚠️ 未知商品名稱"
                                 
-                                # 💡 修正 1：當判定為未知商品時，先將資料「收集」起來，並移除庫存SKU
-                                if prod_name == "⚠️ 未知商品名稱":
-                                    current_order_name = order_no if 'order_no' in locals() and str(order_no).strip() else "手動輸入未命名單號"
-                                    missing_items.append({
-                                        "採購單檔名": current_order_name,
-                                        "國際條碼": str(barcode_input).strip(),
-                                        "狀態": "待處理",
-                                        "建立時間": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                    })
-
-                                # 其他欄位抓取邏輯維持不變
                                 sku = match_row.get('自定義編碼', '')
-                                sku_final = sku if pd.notna(sku) and str(sku).strip() != "" else "⚠️ 提示：須新增iSKU"
+                                if pd.notna(sku) and str(sku).strip() != "":
+                                    sku_final = str(sku).strip()
+                                
                                 category = match_row.get('分類定義', '')
                                 keywords = match_row.get('產品關鍵字', '')
                             
@@ -1192,14 +1182,76 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
                                     or_val = safe_float(match_row.get('麗嬰零售價', None))
                                     sal_val = round(s_val, 2) if s_val is not None else None
 
+                        # 💡 判斷異常狀況並收集
+                        issue_type = ""
+                        if sku_final == "⚠️ 提示：須新增iSKU":
+                            issue_type = "須建立自定義編碼"
+                        elif prod_name == "⚠️ 未知商品名稱":
+                            issue_type = "須建立賣場商品"
+                            
+                        if issue_type:
+                            current_order_name = order_no if 'order_no' in locals() and str(order_no).strip() else "手動輸入未命名單號"
+                            missing_items.append({
+                                "採購單檔名": current_order_name,
+                                "國際條碼": str(barcode_input).strip(),
+                                "狀況": issue_type,  # 寫入異常狀況分類
+                                "狀態": "待處理",    # 統一標記待處理
+                                "建立時間": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            })
+
+                        # 加入最終呈現的明細
                         result_rows.append({
-                            "收貨日": str(recv_date), "國際條碼": barcode_input,
+                            "銷貨日期": str(recv_date), "國際條碼": barcode_input,
                             "庫存SKU": sku_final, "庫存貨品名稱": prod_name, 
                             "麗嬰零售價": or_val if vendor_name == "麗嬰" else None, 
                             "麗嬰批發含稅價": sal_val if vendor_name == "麗嬰" else None,
                             "成本": cost_val, "稅款": tax_val, "數量": qty,
                             "分類定義": category, "產品關鍵字": keywords
                         })
+                        
+                    # 💡 迴圈結束後，整批上傳至「尚未建立商品清單」
+                    if missing_items:
+                        try:
+                            TARGET_SHEET_ID = "18KTllzCNejc5IKkGPsd5zpIBS5bmrUpHnPzJUnEJQW4"
+                            
+                            try:
+                                df_missing = pd.read_excel(download_gdrive_file_to_bytes(TARGET_SHEET_ID), sheet_name=0, dtype=str)
+                            except Exception:
+                                # 包含新的「狀況」欄位
+                                df_missing = pd.DataFrame(columns=["採購單檔名", "國際條碼", "狀況", "狀態", "建立時間"])
+                                
+                            df_missing.columns = df_missing.columns.astype(str).str.strip()
+                            existing_barcodes = df_missing["國際條碼"].astype(str).str.strip().values if "國際條碼" in df_missing.columns else []
+                            
+                            new_missing_items = [item for item in missing_items if item["國際條碼"] not in existing_barcodes]
+                            
+                            if new_missing_items:
+                                df_new_rows = pd.DataFrame(new_missing_items)
+                                df_missing = pd.concat([df_missing, df_new_rows], ignore_index=True)
+                                
+                                output_stream = io.BytesIO()
+                                with pd.ExcelWriter(output_stream, engine='openpyxl') as writer:
+                                    # 更名為「尚未建立商品清單」
+                                    df_missing.to_excel(writer, index=False, sheet_name="尚未建立商品清單")
+                                output_stream.seek(0)
+                                
+                                upload_or_update_gdrive_file(
+                                    folder_id=None,
+                                    file_name="尚未建立商品清單.xlsx", # 更名為「尚未建立商品清單.xlsx」
+                                    file_bytes=output_stream.getvalue(),
+                                    existing_file_id=TARGET_SHEET_ID
+                                )
+                                st.toast(f"🚨 已自動將 {len(new_missing_items)} 筆異常紀錄至雲端！", icon="⚠️")
+                        except Exception as log_err:
+                            print(f"⚠️ 自動記錄異常商品失敗: {str(log_err)}")
+                            
+                    if result_rows:
+                        st.session_state['inward_result_df'] = pd.DataFrame(result_rows)
+                        st.session_state['current_vendor_name'] = vendor_name
+                        st.session_state['current_order_no'] = order_no
+                        # 💡 記錄此張單是否有異常，供後續改檔名使用
+                        st.session_state['has_pending_items'] = len(missing_items) > 0 
+                        st.success(f"🚀 格式勾稽完成！廠商已設定為：【{vendor_name}】")
                         
                     # 💡 修正 2：在 for 迴圈「結束後」，一次性整批讀取並寫入雲端 (解決覆蓋問題)
                     if missing_items:
@@ -1308,10 +1360,20 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
         with pd.ExcelWriter(towrite_inward, engine='openpyxl') as writer:
             edited_inward_df.to_excel(writer, index=False, sheet_name="SiteGiant入庫單")
             
-        final_filename = f"sitegiant採購入庫單_{recv_date}_{current_vendor}_{current_order}.xlsx"
+        # 💡 動態判斷檔名是否要加上 _待處理
+        has_pending = st.session_state.get('has_pending_items', False)
+        pending_suffix = "_待處理" if has_pending else ""
+        
+        # 組合出最終檔名
+        final_filename = f"sitegiant採購入庫單_{recv_date}_{current_vendor}_{current_order}{pending_suffix}.xlsx"
 
-       # upload_or_update_gdrive_file(ID_HISTORY_INWARD_FOLDER, final_filename, towrite_inward.getvalue())
-        st.download_button(label=f"📥 下載sitegiant格式採購入庫單 ({final_filename})", data=towrite_inward.getvalue(), file_name=final_filename, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
+        st.download_button(
+            label=f"📥 下載sitegiant格式採購入庫單 ({final_filename})",
+            data=towrite_inward.getvalue(),
+            file_name=final_filename,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary"
+        )
 
 # -------------------------------------------------------------------------
 # 子功能 7：📜 sitegiant 歷史入庫單紀錄
