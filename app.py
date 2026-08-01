@@ -1110,10 +1110,23 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
     if st.button("📥 解析並產生預覽表格", type="secondary", use_container_width=True):
         if pasted_text.strip():
             try:
-                # 自動解析 Tab 或空白分隔的 Excel 複製資料
+                # 💡 自動解析 Tab 或空白分隔的 Excel 複製資料
                 df_parsed = pd.read_csv(io.StringIO(pasted_text.strip()), sep=r'\s+|\t', engine='python', header=None, dtype=str)
-                df_parsed = df_parsed.iloc[:, :2] # 強制只抓前兩欄
-                df_parsed.columns = ["國際條碼", "數量"]
+                
+                # 動態判斷使用者貼了幾欄
+                col_count = df_parsed.shape[1]
+                
+                if col_count >= 2:
+                    # 如果貼了兩欄以上，只取前兩欄
+                    df_parsed = df_parsed.iloc[:, :2]
+                    df_parsed.columns = ["國際條碼", "數量"]
+                elif col_count == 1:
+                    # 🌟 如果使用者『只貼了一欄（只有國際條碼）』，自動補上第二欄命名為數量，並預設帶入 1
+                    df_parsed = df_parsed.iloc[:, :1]
+                    df_parsed.columns = ["國際條碼"]
+                    df_parsed["數量"] = "1"
+                else:
+                    raise ValueError("文字框內容為空或格式無法辨識。")
                 
                 # 將解析成功的資料存入 session_state 供下方表格渲染
                 st.session_state['inward_input_df'] = df_parsed
