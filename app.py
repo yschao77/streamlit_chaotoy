@@ -1117,6 +1117,82 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
     st.write("---")
     input_df = st.data_editor(st.session_state['inward_input_df'], num_rows="dynamic", use_container_width=True, key="inward_grid")
     st.session_state['inward_input_df'] = input_df 
+
+        # ── 📝 步驟 2：表格即時可編輯渲染與動態加總區塊 ──
+    if 'inward_result_df' in st.session_state:
+        res_df = st.session_state['inward_result_df']
+        current_vendor = st.session_state.get('current_vendor_name', '未命名廠商')
+        current_order = st.session_state.get('current_order_no', '0000')
+        
+        target_columns = ["國際條碼","庫存SKU", "庫存貨品名稱", "麗嬰零售價", "麗嬰批發含稅價", "成本", "稅款", "數量"]
+        available_cols = [col for col in target_columns if col in res_df.columns]
+        df_download = res_df[available_cols].copy()
+        
+        st.markdown(f"📋 **【{current_vendor}】入庫明細編輯與預覽（請雙擊「成本」或「稅款」直接修改數字）：**")
+        
+        # 使用 data_editor 渲染，強制定義為純數值欄位（允許 None 留白編輯）
+        edited_inward_df = st.data_editor(
+            df_download,
+            use_container_width=True,
+            disabled=["國際條碼","庫存SKU", "庫存貨品名稱", "數量"],
+            column_config={
+                "成本": st.column_config.NumberColumn(
+                    "成本", help="請手動輸入未稅成本", min_value=0.0, format="%.2f"
+                ),
+                "稅款": st.column_config.NumberColumn(
+                    "稅款", help="請手動輸入營業稅款", min_value=0.0, format="%.2f"
+                ),
+            },
+            key="inward_items_editor_final"
+        )
+        
+        # ── 📊 步驟 3：【核心動態即時加總】防呆過濾 None 值 ──
+        h_cost = 0.0
+        h_tax = 0.0
+        for h_row in edited_inward_df.itertuples(index=False):
+            h_qty = int(h_row.數量) if (hasattr(h_row, '數量') and pd.notna(h_row.數量)) else 0
+            
+            # 動態累加成本 (成本 * 數量)
+            if hasattr(h_row, '成本') and pd.notna(h_row.成本):
+                try: h_cost += float(h_row.成本) * h_qty
+                except: pass
+                
+            # 動態累加稅款 (稅款 * 數量)
+            if hasattr(h_row, '稅款') and pd.notna(h_row.稅款):
+                try: h_tax += float(h_row.稅款) * h_qty
+                except: pass
+        
+        # ── 🖥️ 步驟 4：動態渲染金額看板 ──
+        st.write("---")
+        st.markdown("#### 📊 本張單據入庫成本稅款即時統計看板 (隨手動輸入動態更新)")
+        c_tot1, c_tot2 = st.columns(2)
+        with c_tot1: 
+            st.metric(label="💰 當前單據成本未稅總金額 (成本 * 數量)", value=f"$ {h_cost:,.2f} 元")
+        with c_tot2: 
+            st.metric(label="🧾 當前單據營業稅總金額 (稅款 * 數量)", value=f"$ {h_tax:,.2f} 元")
+        st.write("---")
+        
+        # ── 💾 步驟 5：儲存與下載 ──
+        towrite_inward = io.BytesIO()
+        with pd.ExcelWriter(towrite_inward, engine='openpyxl') as writer:
+            edited_inward_df.to_excel(writer, index=False, sheet_name="SiteGiant入庫單")
+            
+        # 💡 動態判斷檔名是否要加上 _待處理
+        has_pending = st.session_state.get('has_pending_items', False)
+        pending_suffix = "_待處理" if has_pending else ""
+        
+        # 組合出最終檔名
+        final_filename = f"sitegiant採購入庫單_{recv_date}_{current_vendor}_{current_order}{pending_suffix}.xlsx"
+
+        st.download_button(
+            label=f"📥 下載sitegiant格式採購入庫單 ({final_filename})",
+            data=towrite_inward.getvalue(),
+            file_name=final_filename,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary"
+        )
+
+    st.write("---") # 加一條分隔線讓視覺更清晰
     
     if st.button("✨ 執行貨品名稱和成本稅款導入", type="primary", use_container_width=True):
         if not order_no.strip() or input_df.empty: 
@@ -1252,7 +1328,8 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
                         st.session_state['current_order_no'] = order_no
                         # 💡 記錄此張單是否有異常，供後續改檔名使用
                         st.session_state['has_pending_items'] = len(missing_items) > 0 
-                       # st.success(f"🚀 格式勾稽完成！廠商已設定為：【{vendor_name}】")
+                        st.success(f"🚀 格式勾稽完成！廠商已設定為：【{vendor_name}】")
+                        st.rerun()
                         
                      
                 else:
@@ -1263,83 +1340,12 @@ elif sub_page == "🔀 sitegiant 採購入庫單格式轉換":
                     st.session_state['current_vendor_name'] = vendor_name
                     st.session_state['current_order_no'] = order_no
                     st.success(f"🚀 格式勾稽完成！廠商已設定為：【{vendor_name}】")
+                    st.rerun()
                 
             except Exception as e: 
                 st.error(f"❌ 錯誤: {str(e)}")
 
-    # ── 📝 步驟 2：表格即時可編輯渲染與動態加總區塊 ──
-    if 'inward_result_df' in st.session_state:
-        res_df = st.session_state['inward_result_df']
-        current_vendor = st.session_state.get('current_vendor_name', '未命名廠商')
-        current_order = st.session_state.get('current_order_no', '0000')
-        
-        target_columns = ["國際條碼","庫存SKU", "庫存貨品名稱", "麗嬰零售價", "麗嬰批發含稅價", "成本", "稅款", "數量"]
-        available_cols = [col for col in target_columns if col in res_df.columns]
-        df_download = res_df[available_cols].copy()
-        
-        st.markdown(f"📋 **【{current_vendor}】入庫明細編輯與預覽（請雙擊「成本」或「稅款」直接修改數字）：**")
-        
-        # 使用 data_editor 渲染，強制定義為純數值欄位（允許 None 留白編輯）
-        edited_inward_df = st.data_editor(
-            df_download,
-            use_container_width=True,
-            disabled=["國際條碼","庫存SKU", "庫存貨品名稱", "數量"],
-            column_config={
-                "成本": st.column_config.NumberColumn(
-                    "成本", help="請手動輸入未稅成本", min_value=0.0, format="%.2f"
-                ),
-                "稅款": st.column_config.NumberColumn(
-                    "稅款", help="請手動輸入營業稅款", min_value=0.0, format="%.2f"
-                ),
-            },
-            key="inward_items_editor_final"
-        )
-        
-        # ── 📊 步驟 3：【核心動態即時加總】防呆過濾 None 值 ──
-        h_cost = 0.0
-        h_tax = 0.0
-        for h_row in edited_inward_df.itertuples(index=False):
-            h_qty = int(h_row.數量) if (hasattr(h_row, '數量') and pd.notna(h_row.數量)) else 0
-            
-            # 動態累加成本 (成本 * 數量)
-            if hasattr(h_row, '成本') and pd.notna(h_row.成本):
-                try: h_cost += float(h_row.成本) * h_qty
-                except: pass
-                
-            # 動態累加稅款 (稅款 * 數量)
-            if hasattr(h_row, '稅款') and pd.notna(h_row.稅款):
-                try: h_tax += float(h_row.稅款) * h_qty
-                except: pass
-        
-        # ── 🖥️ 步驟 4：動態渲染金額看板 ──
-        st.write("---")
-        st.markdown("#### 📊 本張單據入庫成本稅款即時統計看板 (隨手動輸入動態更新)")
-        c_tot1, c_tot2 = st.columns(2)
-        with c_tot1: 
-            st.metric(label="💰 當前單據成本未稅總金額 (成本 * 數量)", value=f"$ {h_cost:,.2f} 元")
-        with c_tot2: 
-            st.metric(label="🧾 當前單據營業稅總金額 (稅款 * 數量)", value=f"$ {h_tax:,.2f} 元")
-        st.write("---")
-        
-        # ── 💾 步驟 5：儲存與下載 ──
-        towrite_inward = io.BytesIO()
-        with pd.ExcelWriter(towrite_inward, engine='openpyxl') as writer:
-            edited_inward_df.to_excel(writer, index=False, sheet_name="SiteGiant入庫單")
-            
-        # 💡 動態判斷檔名是否要加上 _待處理
-        has_pending = st.session_state.get('has_pending_items', False)
-        pending_suffix = "_待處理" if has_pending else ""
-        
-        # 組合出最終檔名
-        final_filename = f"sitegiant採購入庫單_{recv_date}_{current_vendor}_{current_order}{pending_suffix}.xlsx"
 
-        st.download_button(
-            label=f"📥 下載sitegiant格式採購入庫單 ({final_filename})",
-            data=towrite_inward.getvalue(),
-            file_name=final_filename,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            type="primary"
-        )
 
 # -------------------------------------------------------------------------
 # 子功能 7：📜 sitegiant 歷史入庫單紀錄
