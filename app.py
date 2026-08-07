@@ -1002,75 +1002,105 @@ elif sub_page == "⚖️ 麗嬰商品表合併和與審核":
 elif sub_page == "📈 蝦皮商品清單轉換":
     st.subheader("🛍️ 蝦皮賣場商品列表iSKU結構校正")
     
+    # 🌟 需求 2：在頁面加入基本步驟指引
+    with st.expander("📖 蝦皮資料校正與整合步驟指引（點擊展開）", expanded=True):
+        st.markdown("""
+        #### 💡 操作指引
+        1. **下載蝦皮資料**：
+           從 [蝦皮庫存列表](https://seller.shopee.tw/portal/product-mass/mass-update/download) 選擇模板 **「價格及庫存」** → 下載
+           *(檔案命稱格式為: `mass_update_sales_info_xxxx_*.xlsx`)*
+        2. **上傳該檔案並進行格式校正**：
+           於下方上傳剛下載的 Excel 檔案。
+        3. **以最新校正的蝦皮資料重新執行三表整合並回寫雲端**：
+           校正完成後，點擊下方自動化推薦操作按鈕，即可一鍵完成回寫。
+        """)
+        
+    st.write("---")
+    
     # 延遲載入蝦皮快取
     df_shopee_history, df_shopee_current_list = load_shopee_data(ID_SHOPEE_MASTER)
 
     uploaded_shopee = st.file_uploader("📥 上傳新的蝦皮商品清單原始報表 (.xlsx/.xls/.xlsm) 進行格式校正：", type=["xlsx", "xls", "xlsm"], key="main_shopee_upload")
+    
     if uploaded_shopee:
         file_bytes = uploaded_shopee.read()
         shopee_md5 = calculate_md5(file_bytes)
         
-        if shopee_md5 in df_shopee_history['md5'].astype(str).values:
-            st.error(f"⚠️ 拒絕重複格式校正！系統已自動封鎖。")
-        else:
-            if st.button("🪄 執行蝦皮iSKU結構校正", type="primary", use_container_width=True):
-                try:
-                    df_shopee_raw = pd.read_excel(io.BytesIO(file_bytes), header=None, engine='openpyxl')
-                    if df_shopee_raw.shape[1] >= 11: df_shopee_raw.drop(df_shopee_raw.columns[10], axis=1, inplace=True)
-                    shopee_headers = df_shopee_raw.iloc[2].astype(str).str.strip().tolist()
-                    df_shopee = df_shopee_raw.iloc[6:].copy()
-                    df_shopee.columns = shopee_headers
-                    df_shopee.reset_index(drop=True, inplace=True)
+        # 🌟 需求 1 修復：取消「拒絕重複格式校正！系統已自動封鎖」的硬性阻斷
+        is_duplicate = shopee_md5 in df_shopee_history['md5'].astype(str).values
+        is_standardized = "shopee_standardized_" in uploaded_shopee.name
+
+        if is_duplicate and not is_standardized:
+            st.warning("⚠️ 系統偵測到此檔案先前似乎已處理過（MD5 重複）。為避免誤判，系統不再自動封鎖，您仍可點擊下方按鈕強制重新校正與整合。")
+        elif is_standardized:
+            st.info("ℹ️ 偵測到此為已校正過之標準檔案格式。")
+
+        # 無論是否重複，都允許使用者點擊執行
+        if st.button("🪄 執行蝦皮iSKU結構校正", type="primary", use_container_width=True):
+            try:
+                df_shopee_raw = pd.read_excel(io.BytesIO(file_bytes), header=None, engine='openpyxl')
+                if df_shopee_raw.shape[1] >= 11: df_shopee_raw.drop(df_shopee_raw.columns[10], axis=1, inplace=True)
+                shopee_headers = df_shopee_raw.iloc[2].astype(str).str.strip().tolist()
+                df_shopee = df_shopee_raw.iloc[6:].copy()
+                df_shopee.columns = shopee_headers
+                df_shopee.reset_index(drop=True, inplace=True)
+                
+                def calc_isku_row(row):
+                    opt = str(row.get('商品選項貨號', '')).strip()
+                    main = str(row.get('主商品貨號', '')).strip()
+                    if opt in ["見選項", "null", "Null", "nan", "NaN", "None"]: opt = ""
+                    if main in ["見選項", "null", "Null", "nan", "NaN", "None"]: main = ""
+                    return opt if opt != "" else (main if main != "" else "蝦皮無iSKU")
                     
-                    def calc_isku_row(row):
-                        opt = str(row.get('商品選項貨號', '')).strip()
-                        main = str(row.get('主商品貨號', '')).strip()
-                        if opt in ["見選項", "null", "Null", "nan", "NaN", "None"]: opt = ""
-                        if main in ["見選項", "null", "Null", "nan", "NaN", "None"]: main = ""
-                        return opt if opt != "" else (main if main != "" else "蝦皮無iSKU")
-                        
-                    df_shopee['iSKU'] = df_shopee.apply(calc_isku_row, axis=1)
-                    df_shopee['original_index'] = df_shopee.index
-                    cols_list = list(df_shopee.columns)
-                    if "iSKU" in cols_list and "價格" in cols_list:
-                        cols_list.remove("iSKU")
-                        cols_list.insert(cols_list.index("價格"), "iSKU")
-                        df_shopee = df_shopee[cols_list]
-                    
-                    df_valid_isku = df_shopee[df_shopee['iSKU'] != "蝦皮無iSKU"].copy()
-                    df_isku_keep = df_valid_isku.sort_values(by=['iSKU', '價格', 'original_index']).drop_duplicates(subset=['iSKU'], keep='last')
-                    df_gtin_check = df_isku_keep.copy()
-                    df_gtin_check['GTIN_str'] = df_gtin_check['GTIN'].astype(str).str.strip().str.split('.').str[0]
-                    df_gtin_keep = df_gtin_check[~df_gtin_check['GTIN_str'].isin(["", "00", "0", "nan"])].sort_values(by=['GTIN_str', '價格', 'original_index']).drop_duplicates(subset=['GTIN_str'], keep='last')
-                    df_final_clean = pd.concat([df_gtin_keep, df_gtin_check[df_gtin_check['GTIN_str'].isin(["", "00", "0", "nan"])]]).sort_values(by='original_index')
-                                     
-                    # 🗑️ 刪除這裡原本的 out_buf_sp = io.BytesIO() 與 upload_or_update_gdrive_file，這是造成 NPE 的元凶！
-                    
-                    # 📝 只需要保留歷史紀錄與下方正確的 save_to_shopee_master_xlsm 呼叫
+                df_shopee['iSKU'] = df_shopee.apply(calc_isku_row, axis=1)
+                df_shopee['original_index'] = df_shopee.index
+                cols_list = list(df_shopee.columns)
+                if "iSKU" in cols_list and "價格" in cols_list:
+                    cols_list.remove("iSKU")
+                    cols_list.insert(cols_list.index("價格"), "iSKU")
+                    df_shopee = df_shopee[cols_list]
+                
+                df_valid_isku = df_shopee[df_shopee['iSKU'] != "蝦皮無iSKU"].copy()
+                df_isku_keep = df_valid_isku.sort_values(by=['iSKU', '價格', 'original_index']).drop_duplicates(subset=['iSKU'], keep='last')
+                df_gtin_check = df_isku_keep.copy()
+                df_gtin_check['GTIN_str'] = df_gtin_check['GTIN'].astype(str).str.strip().str.split('.').str[0]
+                df_gtin_keep = df_gtin_check[~df_gtin_check['GTIN_str'].isin(["", "00", "0", "nan"])].sort_values(by=['GTIN_str', '價格', 'original_index']).drop_duplicates(subset=['GTIN_str'], keep='last')
+                df_final_clean = pd.concat([df_gtin_keep, df_gtin_check[df_gtin_check['GTIN_str'].isin(["", "00", "0", "nan"])]]).sort_values(by='original_index')
+                                 
+                # 若非重複檔案，才寫入歷史紀錄避免 log 冗長
+                if not is_duplicate:
                     new_hist_log = pd.DataFrame([{"檔案名稱": uploaded_shopee.name, "md5": shopee_md5, "匯入時間": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}])
                     df_shopee_history = pd.concat([df_shopee_history, new_hist_log], ignore_index=True)
+                
+                if save_to_shopee_master_xlsm({"蝦皮商品列表": df_final_clean, "匯入檔案": df_shopee_history}):
+                    load_shopee_data.clear() 
+                    get_cached_gdrive_id.clear()
+                    st.session_state['shopee_clean'] = df_final_clean
+                    st.success(f"🎉 蝦皮賣場商品列表iSKU結構校正完成！\n🟢 雲端現有主表 `蝦皮賣場商品列表.xlsm` 已成功同步覆寫更新！")
                     
-                    # 🟢 使用全域的安全寫入函數 (會自動處理 keep_vba=True 並呼叫 update API)
-                    if save_to_shopee_master_xlsm({"蝦皮商品列表": df_final_clean, "匯入檔案": df_shopee_history}):
-                        load_shopee_data.clear() 
-                        get_cached_gdrive_id.clear()
-                        st.session_state['shopee_clean'] = df_final_clean
-                        st.success(f"🎉 蝦皮賣場商品列表iSKU結構校正完成！\n🟢 雲端現有主表 `蝦皮賣場商品列表.xlsm` 已成功同步覆寫更新！")
-                        
-                        st.markdown("---")
-                        st.markdown("### ⚡ 後續自動化推薦操作")
-                        if st.button("🚀 馬上更新：以最新校正的蝦皮資料重新執行三表整合並回寫雲端", type="primary", use_container_width=True):
-                            with st.spinner("⏳ 正在重新整理跨表聯結數據並回寫..."):
-                                if run_powerquery_and_update_gdrive():
-                                    st.success("✅ 成功！雲端『商品蝦皮麗嬰價格統整表』已同步使用最新校正後的蝦皮資料覆寫更新！")
-                except Exception as e:
-                    st.error(f"讀取或清洗蝦皮檔案失敗: {str(e)}")
+            except Exception as e:
+                st.error(f"讀取或清洗蝦皮檔案失敗: {str(e)}")
 
+    # 確保自動化操作獨立於檔案上傳按鈕邏輯外，校正完成後隨時可見
     if 'shopee_clean' in st.session_state:
+        st.markdown("---")
+        st.markdown("### ⚡ 後續自動化推薦操作")
+        
+        # 🌟 對應需求 3：以最新校正的蝦皮資料重新執行三表整合
+        if st.button("🚀 以最新校正的蝦皮資料重新執行三表整合並回寫雲端", type="primary", use_container_width=True):
+            with st.spinner("⏳ 正在重新整理跨表聯結數據並回寫..."):
+                if run_powerquery_and_update_gdrive():
+                    st.success("✅ 成功！雲端『商品蝦皮麗嬰價格統整表』已同步使用最新校正後的蝦皮資料覆寫更新！")
+
         st.dataframe(st.session_state['shopee_clean'], use_container_width=True)
         towrite_shopee = io.BytesIO()
         st.session_state['shopee_clean'].to_excel(towrite_shopee, index=False)
-        st.download_button(label="📥 下載此次iSKU校正蝦皮報表 (.xlsx)", data=towrite_shopee.getvalue(), file_name=f"蝦皮清洗完成對齊表_{datetime.date.today().strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.download_button(
+            label="📥 下載此次iSKU校正蝦皮報表 (.xlsx)", 
+            data=towrite_shopee.getvalue(), 
+            file_name=f"蝦皮清洗完成對齊表_{datetime.date.today().strftime('%Y%m%d')}.xlsx", 
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
 # -------------------------------------------------------------------------
 # 子功能 6：🔀 sitegiant 採購入庫單轉換
