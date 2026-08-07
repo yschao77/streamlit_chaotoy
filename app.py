@@ -400,7 +400,7 @@ else:
     st.sidebar.markdown("### 🌐 sitegiant 電商整合管理")
     sub_page = st.sidebar.radio(
         "請選擇執行項目：",
-        ["🔀 sitegiant 採購入庫單格式轉換", "📜 sitegiant 歷史入庫單紀錄", "📦 SiteGiant 批量新增UPC"],
+        ["🔀 sitegiant 採購入庫單格式轉換", "📜 sitegiant 歷史入庫單紀錄", "📦 SiteGiant 批量新增UPC", "📋 採購單待處理"],
         index=0
     )
 
@@ -1665,3 +1665,52 @@ elif sub_page == "📦 SiteGiant 批量新增UPC":
                 type="primary",
                 use_container_width=True
             )
+# -------------------------------------------------------------------------
+# 子功能 10：📋 採購單待處理
+# -------------------------------------------------------------------------
+elif sub_page == "📋 採購單待處理":
+    st.subheader("📋 採購單待處理 (尚未建立商品清單)")
+    
+    # 目標雲端檔案 ID
+    TARGET_SHEET_ID = "1Ixp9V_u2yU8hiWhxQCHNDB4kPKlxDGD2"
+    
+    with st.spinner("⏳ 正在由雲端獲取待處理清單..."):
+        try:
+            # 💡 導入快取與 calamine 高速讀取
+            file_bytes = get_cached_gdrive_file_bytes(TARGET_SHEET_ID)
+            engine_kw = {"engine": "calamine"} if HAS_CALAMINE else {}
+            df_pending = pd.read_excel(io.BytesIO(file_bytes), sheet_name=0, dtype=str, **engine_kw)
+            
+            # 清理可能有空白的標題
+            df_pending.columns = df_pending.columns.astype(str).str.strip()
+            
+            if df_pending.empty:
+                st.success("🎉 太棒了！目前沒有任何待處理的異常商品與採購單。")
+            else:
+                st.markdown(f"📊 **目前待處理總筆數**：`{len(df_pending)} 筆`")
+                st.info("💡 下方為過去轉換入庫單時，找不到雲端統整表對應紀錄的異常商品，請調閱並盡速前往建立或更新資料。")
+                
+                # 在畫面上渲染預覽表
+                st.dataframe(df_pending, use_container_width=True)
+                
+                # 提供下載最新清單的功能
+                towrite_pending = io.BytesIO()
+                with pd.ExcelWriter(towrite_pending, engine='openpyxl') as writer:
+                    df_pending.to_excel(writer, index=False, sheet_name="尚未建立商品清單")
+                
+                st.download_button(
+                    label="📥 下載待處理清單報表 (.xlsx)",
+                    data=towrite_pending.getvalue(),
+                    file_name=f"尚未建立商品清單_匯出_{datetime.date.today().strftime('%Y%m%d')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+                
+                # (選用) 加入重新載入按鈕，方便使用者若手動去雲端改完，可以馬上刷新快取
+                if st.button("🔄 重新載入最新雲端資料", use_container_width=True):
+                    get_cached_gdrive_file_bytes.clear()
+                    st.rerun()
+                    
+        except Exception as e:
+            st.error(f"❌ 讀取雲端清單失敗，可能是該檔案尚未被系統自動建立或權限不足。")
+            st.warning(f"詳細錯誤訊息: {str(e)}")
