@@ -260,6 +260,15 @@ if "商品蝦皮麗嬰統整管理" in main_module:
         index=3
     )
 else:
+    # 1. 必須保留這段：在側邊欄產生 Radio 選單，這樣系統才知道 sub_page 是什麼！
+    st.sidebar.markdown("### 🌐 sitegiant 電商整合管理")
+    sub_page = st.sidebar.radio(
+        "請選擇執行項目：",
+        ["🔀 sitegiant 採購入庫單格式轉換", "📜 sitegiant 歷史入庫單紀錄", "📦 SiteGiant 批量新增UPC", "📋 採購單待處理"], 
+        index=0
+    )
+
+    # 2. 然後才是呼叫我們剛剛寫好的模組，並把 sub_page 傳給它
     sitegiant_page.render(
         sub_page=sub_page, 
         ID_PRICE_SUMMARY=ID_PRICE_SUMMARY, 
