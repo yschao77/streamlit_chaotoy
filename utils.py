@@ -185,3 +185,147 @@ def load_shopee_data(file_id):
         return df_hist, df_list
     except Exception:
         return pd.DataFrame(columns=["檔案名稱", "md5", "匯入時間"]), pd.DataFrame()
+
+
+# =========================================================================
+# 💾 5. 核心資料庫讀寫與勾稽常式
+# =========================================================================
+import openpyxl
+
+def save_to_master_xlsm(sheets_dict, file_id, folder_id, file_name):
+    if not file_id:
+        st.error(f"❌ 雲端找不到核心總表檔案")
+        return False
+    try:
+        master_bytes = download_gdrive_file_to_bytes(file_id)
+        wb = openpyxl.load_workbook(master_bytes, keep_vba=True)
+        for sheet_name, df in sheets_dict.items():
+            if sheet_name in wb.sheetnames:
+                ws = wb[sheet_name]
+                ws.delete_rows(1, ws.max_row + 1)
+            else:
+                ws = wb.create_sheet(sheet_name)
+            ws.append(list(df.columns))
+            
+            barcode_col_idx = list(df.columns).index("條碼") + 1 if "條碼" in df.columns else None
+            for row_idx, row in enumerate(df.itertuples(index=False), start=2):
+                cleaned_row = []
+                for col_idx, x in enumerate(row):
+                    if pd.isna(x): cleaned_row.append("")
+                    elif barcode_col_idx and (col_idx + 1) == barcode_col_idx: cleaned_row.append(str(x).strip().split('.')[0])
+                    else: cleaned_row.append(x)
+                ws.append(cleaned_row)
+                if barcode_col_idx: ws.cell(row=row_idx, column=barcode_col_idx).number_format = '@'
+                    
+        out_buf = io.BytesIO()
+        wb.save(out_buf)
+        upload_or_update_gdrive_file(folder_id, file_name or "麗嬰採購產品總表.xlsm", out_buf.getvalue(), existing_file_id=file_id)
+        return True
+    except Exception as e:
+        st.error(f"❌ 寫入雲端資料庫發生錯誤: {str(e)}")
+        return False
+
+def save_to_shopee_master_xlsm(sheets_dict, file_id, folder_id, file_name):
+    try:
+        if file_id:
+            shopee_bytes = download_gdrive_file_to_bytes(file_id)
+            wb = openpyxl.load_workbook(shopee_bytes, keep_vba=True)
+        else:
+            wb = openpyxl.Workbook()
+            
+        for sheet_name, df in sheets_dict.items():
+            if sheet_name in wb.sheetnames:
+                ws = wb[sheet_name]
+                ws.delete_rows(1, ws.max_row + 1)
+            else:
+                ws = wb.create_sheet(sheet_name)
+            ws.append(list(df.columns))
+            for row in df.itertuples(index=False):
+                cleaned_row = [" " if pd.isna(x) else x for x in row]
+                ws.append(cleaned_row)
+                
+        out_buf = io.BytesIO()
+        wb.save(out_buf)
+        upload_or_update_gdrive_file(
+            folder_id, 
+            file_name or "蝦皮賣場商品列表.xlsm", 
+            out_buf.getvalue(), 
+            existing_file_id=file_id
+        )
+        return True
+    except Exception as e:
+        st.error(f"❌ 寫入雲端蝦皮資料庫發生錯誤: {str(e)}")
+        return False
+
+def run_cross_matching(df):
+    if df.empty: return df
+    df['備註'] = df['備註'].astype(str).apply(lambda x: "" if x == "nan" or x == "None" else x)
+    records = df.to_dict('records')
+    from collections import defaultdict
+    barcode_groups = defaultdict(list)
+    for idx, row in enumerate(records):
+        b_str = str(row.get('條碼', '')).strip().split('.')[0]
+        if b_str and b_str not in ["", "0", "nan", "None"]:
+            barcode_groups[b_str].append(idx)
+            
+    for b_str, indices in barcode_groups.items():
+        if len(indices) > 1:
+            for check_idx in indices:
+                check_row = records[check_idx]
+                name_str = str(check_row.get('名稱', '')).strip()
+                existing_remark = str(check_row.get('備註', '')).strip()
+                if existing_remark and not any(k in existing_remark for k in ["條碼重複", "名稱不同", "零售價不同"]):
+                    continue
+                    
+                try: price_val = float(check_row.get('零售價', 0)) if pd.notna(check_row.get('零售價', 0)) else 0
+                except: price_val = 0
+                
+                for comp_idx in indices:
+                    if check_idx == comp_idx: continue
+                    comp_row = records[comp_idx]
+                    comp_name_str = str(comp_row.get('名稱', '')).strip()
+                    try: comp_price_val = float(comp_row.get('零售價', 0)) if pd.notna(comp_row.get('零售價', 0)) else 0
+                    except: comp_price_val = 0
+                    uid_str = str(comp_row.get('UID', '未知')).strip()
+                    
+                    if name_str != comp_name_str:
+                        records[check_idx]['備註'] = f"與 UID: {uid_str} 條碼重複, 名稱不同"
+                        break
+                    elif price_val != comp_price_val:
+                        records[check_idx]['備註'] = f"與 UID: {uid_str} 條碼重複, 名稱相同, 零售價不同"
+                        break
+    return pd.DataFrame(records)
+
+@st.cache_data(ttl=600)
+def load_master_data(file_id):
+    if not file_id: return None, None, None, None, None, 3473
+    try:
+        master_bytes = download_gdrive_file_to_bytes(file_id)
+        with pd.ExcelFile(master_bytes) as xls:
+            df_total = pd.read_excel(xls, "麗嬰國際產品總表")
+            df_history = pd.read_excel(xls, "已處理採購單")
+            df_delete_log = pd.read_excel(xls, "刪除紀錄") if "刪除紀錄" in xls.sheet_names else pd.DataFrame(columns=["UID", "名稱", "條碼", "零售價", "備註", "匯入檔名", "刪除時間"])
+            df_meta = pd.read_excel(xls, "metadata")
+            all_sheets = xls.sheet_names
+            
+        if "條碼" in df_total.columns:
+            df_total['條碼'] = df_total['條碼'].astype(str).str.strip().str.split('.').str[0]
+        if "條碼" in df_delete_log.columns:
+            df_delete_log['條碼'] = df_delete_log['條碼'].astype(str).str.strip().str.split('.').str[0]
+            
+        if not df_history.empty:
+            df_history.columns = [str(col).strip().lower() for col in df_history.columns]
+            df_history = df_history.loc[:, ~df_history.columns.duplicated()].copy()
+            standard_cols = ["檔案名稱", "md5", "匯入時間"]
+            if len(df_history.columns) >= 3:
+                df_history.columns = standard_cols + list(df_history.columns[3:])
+            else:
+                df_history = pd.DataFrame(columns=standard_cols)
+        else:
+            df_history = pd.DataFrame(columns=["檔案名稱", "md5", "匯入時間"])
+            
+        current_max_uid = int(df_meta.iloc[0, 0]) if not df_meta.empty else 3473
+        return df_total, df_history, df_delete_log, df_meta, all_sheets, current_max_uid
+    except Exception as e:
+        st.error(f"🔴 讀取雲端主資料庫失敗。錯誤: {str(e)}")
+        return None, None, None, None, None, 3473
