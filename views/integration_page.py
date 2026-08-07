@@ -3,6 +3,8 @@ import pandas as pd
 import io
 import datetime
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 # 從 utils.py 引入所有工具
 from utils import (
     HAS_CALAMINE, download_gdrive_file_to_bytes, upload_or_update_gdrive_file,
