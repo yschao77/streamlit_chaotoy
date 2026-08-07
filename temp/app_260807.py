@@ -1,35 +1,174 @@
 import streamlit as st
 import pandas as pd
 import openpyxl
-import io
+import hashlib
 import datetime
-import json
+import io
 import os
-
-# 🌟 從我們剛建立的 utils 中匯入所有工具函式
-from utils import (
-    apply_openpyxl_patch, HAS_CALAMINE, get_cached_gdrive_id, 
-    list_gdrive_files, download_gdrive_file_to_bytes, 
-    get_cached_gdrive_file_bytes, upload_or_update_gdrive_file, 
-    format_gdrive_time, calculate_md5, clean_barcode, process_smart_headers
-)
-
-# 執行修補程式
-apply_openpyxl_patch()
+import json
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 
 # 設定網頁標題與寬度
 st.set_page_config(page_title="麗嬰與蝦皮商務數據情報中心", page_icon="📊", layout="wide")
 
 # =========================================================================
-# 🌐 雲端資料夾 ID 定義 (這些是常數，留在主檔沒問題)
+# 🛠️ 🔴 全域攔截並修補 openpyxl 描述器核心驗證 Bug (Monkey Patch)
 # =========================================================================
-ID_PROD_FOLDER = "1NtMAYb-SvdH6XMmqB5G07ttB-NuWCqDV"          
-ID_PRICE_SUMMARY_FOLDER = "1ZM4MscX0UO6rUHjKv-mN5fKDwxg53maZ" 
-ID_SHOPEE_FOLDER = "17eiGnXyU4KwNS6IR5bubBPti46SKXMH0"        
-ID_HISTORY_INWARD_FOLDER = "1ZQ7x4BdRc6BJlURxQ61JqDKrKF7h_vSH"
-ID_BASE_FOLDER = "1HjMt8z8DXlqGhSqe50_hDR3f4LpVLK_w"          
+try:
+    import openpyxl.descriptors.base
+    orig_set_attr = openpyxl.descriptors.base.Set.__set__
 
-# 取得主表 ID 狀態
+    def patched_set_attr(self, instance, value):
+        if isinstance(value, str) and '-' in value:
+            parts = value.split('-')
+            value = parts[0] + ''.join(p.title() for p in parts[1:])
+        
+        try:
+            orig_set_attr(self, instance, value)
+        except ValueError:
+            if hasattr(self, 'values'):
+                if isinstance(self.values, set):
+                    self.values.add(value)
+                elif isinstance(self.values, tuple):
+                    self.values = self.values + (value,)
+                elif isinstance(self.values, list):
+                    self.values.append(value)
+            orig_set_attr(self, instance, value)
+
+    openpyxl.descriptors.base.Set.__set__ = patched_set_attr
+except Exception:
+    pass
+    
+# =========================================================================
+# 🛠️ check python-calamine
+# =========================================================================
+try:
+    import calamine
+    HAS_CALAMINE = True
+except ImportError:
+    HAS_CALAMINE = False
+
+# =========================================================================
+# 🌐 1. Google Drive 雲端資料夾 ID 定義與權限初始化
+# =========================================================================
+ID_PROD_FOLDER = "1NtMAYb-SvdH6XMmqB5G07ttB-NuWCqDV"          # 商品列表 資料夾 ID
+ID_PRICE_SUMMARY_FOLDER = "1ZM4MscX0UO6rUHjKv-mN5fKDwxg53maZ" # 價格統整表 資料夾 ID
+ID_SHOPEE_FOLDER = "17eiGnXyU4KwNS6IR5bubBPti46SKXMH0"        # 蝦皮商品清單 資料夾 ID
+ID_HISTORY_INWARD_FOLDER = "1ZQ7x4BdRc6BJlURxQ61JqDKrKF7h_vSH"# 歷史入庫單 資料夾 ID
+ID_BASE_FOLDER = "1HjMt8z8DXlqGhSqe50_hDR3f4LpVLK_w"          # 麗嬰採購統整 資料夾 ID
+
+@st.cache_resource
+def init_drive_service():
+    """讀取部署後設定在 Streamlit Secrets 的金鑰字典並建立雲端連線"""
+    try:
+        google_secrets = st.secrets["textkey"]
+        credentials = service_account.Credentials.from_service_account_info(
+            google_secrets,
+            scopes=["https://www.googleapis.com/auth/drive"]
+        )
+        return build('drive', 'v3', credentials=credentials)
+    except Exception as e:
+        st.error(f"❌ 無法從 Streamlit Secrets 中讀取 `textkey` 憑證。錯誤訊息: {str(e)}")
+        st.info("💡 請確認您的 Secrets 設定格式是否正確。")
+        st.stop()
+
+service = init_drive_service()
+
+# =========================================================================
+# 🔍 2. 雲端核心實戰工具與搜尋常式
+# =========================================================================
+@st.cache_data(ttl=3600)  # 優化：快取雲端檔案搜尋結果 1 小時
+def get_cached_gdrive_id(folder_id, file_name_keyword):
+    """在指定的 Google Drive 資料夾中，根據名稱搜尋檔案並返回其 ID、修改時間、完整檔名"""
+    try:
+        query = f"'{folder_id}' in parents and name contains '{file_name_keyword}' and trashed = false"
+        results = service.files().list(q=query, fields="files(id, name, modifiedTime)", pageSize=1).execute()
+        files = results.get('files', [])
+        if files:
+            return files[0]['id'], files[0]['modifiedTime'], files[0]['name']
+    except Exception:
+        pass
+    return None, None, None
+
+def list_gdrive_files(folder_id):
+    """列出雲端資料夾內的所有 Excel 檔案"""
+    try:
+        query = f"'{folder_id}' in parents and (mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' or mimeType = 'application/vnd.ms-excel.sheet.macroEnabled.12') and trashed = false"
+        results = service.files().list(q=query, fields="files(id, name, modifiedTime)").execute()
+        files = results.get('files', [])
+        files.sort(key=lambda x: x['name'], reverse=True)
+        return files
+    except Exception as e:
+        st.error(f"掃描雲端資料夾失敗: {str(e)}")
+        return []
+
+def download_gdrive_file_to_bytes(file_id):
+    """將雲端檔案下載至記憶體中"""
+    request = service.files().get_media(fileId=file_id)
+    file_stream = io.BytesIO()
+    downloader = MediaIoBaseDownload(file_stream, request)
+    done = False
+    while done is False:
+        status, done = downloader.next_chunk()
+    file_stream.seek(0)
+    return file_stream
+
+@st.cache_data(ttl=600, show_spinner="☁️ 正在從雲端載入檔案...")
+def get_cached_gdrive_file_bytes(file_id):
+    """快取雲端檔案的純 Bytes 內容，確保 Streamlit 快取安全且避免重複下載"""
+    file_stream = download_gdrive_file_to_bytes(file_id)
+    return file_stream.getvalue()  # 💡 加上 .getvalue()，將串流轉化為純 bytes！
+
+def upload_or_update_gdrive_file(folder_id, file_name, file_bytes, existing_file_id=None):
+    """【強制覆寫優化版】動態判斷 mimetype，避免 Google Drive 鎖定檔案"""
+    
+    # 💡 1. 根據附檔名動態判定正確的 MIME Type
+    file_name_str = str(file_name).lower()
+    if file_name_str.endswith('.xlsm'):
+        mime_type = 'application/vnd.ms-excel.sheet.macroEnabled.12'
+    elif file_name_str.endswith('.xls'):
+        mime_type = 'application/vnd.ms-excel'
+    else:
+        mime_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        
+    # 2. 封裝上傳內容
+    media = MediaIoBaseUpload(
+        io.BytesIO(file_bytes), 
+        mimetype=mime_type, 
+        resumable=True
+    )
+    
+    if existing_file_id:
+        # 🟢 只准執行 Update，並維持原檔案擁有者權限
+        service.files().update(
+            fileId=existing_file_id, 
+            media_body=media, 
+            supportsAllDrives=True
+        ).execute()
+        return existing_file_id
+    else:
+        # 🔴 防呆攔截：阻斷 Create 行為
+        st.error(f"❌ 拒絕建立新檔案【{file_name}】！為避免 Google 空間配額與權限錯誤，請先手動於雲端建立該檔案。")
+        st.stop()
+
+def format_gdrive_time(time_str):
+    if not time_str:
+        return "❌ 雲端檔案尚未建立/不存在"
+    try:
+        dt = datetime.datetime.strptime(time_str.split('.')[0], "%Y-%m-%dT%H:%M:%S")
+        dt = dt + datetime.timedelta(hours=8)
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    except:
+        return time_str
+
+def calculate_md5(file_bytes):
+    return hashlib.md5(file_bytes).hexdigest()
+
+# -------------------------------------------------------------------------
+# 動態偵測各核心主表的雲端 ID ＆ 最後修改時間 (使用 Cache 加速)
+# -------------------------------------------------------------------------
 ID_MASTER_FILE, TIME_MASTER, NAME_MASTER = get_cached_gdrive_id(ID_BASE_FOLDER, "麗嬰採購產品總表")
 ID_LOCAL_PROD, TIME_PROD, NAME_PROD = get_cached_gdrive_id(ID_PROD_FOLDER, "商品列表")
 ID_SHOPEE_MASTER, TIME_SHOPEE, NAME_SHOPEE = get_cached_gdrive_id(ID_SHOPEE_FOLDER, "蝦皮賣場商品列表")
@@ -261,7 +400,7 @@ else:
     st.sidebar.markdown("### 🌐 sitegiant 電商整合管理")
     sub_page = st.sidebar.radio(
         "請選擇執行項目：",
-        ["🔀 sitegiant 採購入庫單格式轉換", "📜 sitegiant 歷史入庫單紀錄", "📦 SiteGiant 批量新增UPC", "📋 採購單待處理"],
+        ["🔀 sitegiant 採購入庫單格式轉換", "📜 sitegiant 歷史入庫單紀錄", "📦 SiteGiant 批量新增UPC"],
         index=0
     )
 
@@ -863,105 +1002,75 @@ elif sub_page == "⚖️ 麗嬰商品表合併和與審核":
 elif sub_page == "📈 蝦皮商品清單轉換":
     st.subheader("🛍️ 蝦皮賣場商品列表iSKU結構校正")
     
-    # 🌟 需求 2：在頁面加入基本步驟指引
-    with st.expander("📖 蝦皮資料校正與整合步驟指引（點擊展開）", expanded=True):
-        st.markdown("""
-        #### 💡 操作指引
-        1. **下載蝦皮資料**：
-           從 [蝦皮庫存列表](https://seller.shopee.tw/portal/product-mass/mass-update/download) 選擇模板 **「價格及庫存」** → 下載
-           *(檔案命稱格式為: `mass_update_sales_info_xxxx_*.xlsx`)*
-        2. **上傳該檔案並進行格式校正**：
-           於下方上傳剛下載的 Excel 檔案。
-        3. **以最新校正的蝦皮資料重新執行三表整合並回寫雲端**：
-           校正完成後，點擊下方自動化推薦操作按鈕，即可一鍵完成回寫。
-        """)
-        
-    st.write("---")
-    
     # 延遲載入蝦皮快取
     df_shopee_history, df_shopee_current_list = load_shopee_data(ID_SHOPEE_MASTER)
 
     uploaded_shopee = st.file_uploader("📥 上傳新的蝦皮商品清單原始報表 (.xlsx/.xls/.xlsm) 進行格式校正：", type=["xlsx", "xls", "xlsm"], key="main_shopee_upload")
-    
     if uploaded_shopee:
         file_bytes = uploaded_shopee.read()
         shopee_md5 = calculate_md5(file_bytes)
         
-        # 🌟 需求 1 修復：取消「拒絕重複格式校正！系統已自動封鎖」的硬性阻斷
-        is_duplicate = shopee_md5 in df_shopee_history['md5'].astype(str).values
-        is_standardized = "shopee_standardized_" in uploaded_shopee.name
-
-        if is_duplicate and not is_standardized:
-            st.warning("⚠️ 系統偵測到此檔案先前似乎已處理過（MD5 重複）。為避免誤判，系統不再自動封鎖，您仍可點擊下方按鈕強制重新校正與整合。")
-        elif is_standardized:
-            st.info("ℹ️ 偵測到此為已校正過之標準檔案格式。")
-
-        # 無論是否重複，都允許使用者點擊執行
-        if st.button("🪄 執行蝦皮iSKU結構校正", type="primary", use_container_width=True):
-            try:
-                df_shopee_raw = pd.read_excel(io.BytesIO(file_bytes), header=None, engine='openpyxl')
-                if df_shopee_raw.shape[1] >= 11: df_shopee_raw.drop(df_shopee_raw.columns[10], axis=1, inplace=True)
-                shopee_headers = df_shopee_raw.iloc[2].astype(str).str.strip().tolist()
-                df_shopee = df_shopee_raw.iloc[6:].copy()
-                df_shopee.columns = shopee_headers
-                df_shopee.reset_index(drop=True, inplace=True)
-                
-                def calc_isku_row(row):
-                    opt = str(row.get('商品選項貨號', '')).strip()
-                    main = str(row.get('主商品貨號', '')).strip()
-                    if opt in ["見選項", "null", "Null", "nan", "NaN", "None"]: opt = ""
-                    if main in ["見選項", "null", "Null", "nan", "NaN", "None"]: main = ""
-                    return opt if opt != "" else (main if main != "" else "蝦皮無iSKU")
+        if shopee_md5 in df_shopee_history['md5'].astype(str).values:
+            st.error(f"⚠️ 拒絕重複格式校正！系統已自動封鎖。")
+        else:
+            if st.button("🪄 執行蝦皮iSKU結構校正", type="primary", use_container_width=True):
+                try:
+                    df_shopee_raw = pd.read_excel(io.BytesIO(file_bytes), header=None, engine='openpyxl')
+                    if df_shopee_raw.shape[1] >= 11: df_shopee_raw.drop(df_shopee_raw.columns[10], axis=1, inplace=True)
+                    shopee_headers = df_shopee_raw.iloc[2].astype(str).str.strip().tolist()
+                    df_shopee = df_shopee_raw.iloc[6:].copy()
+                    df_shopee.columns = shopee_headers
+                    df_shopee.reset_index(drop=True, inplace=True)
                     
-                df_shopee['iSKU'] = df_shopee.apply(calc_isku_row, axis=1)
-                df_shopee['original_index'] = df_shopee.index
-                cols_list = list(df_shopee.columns)
-                if "iSKU" in cols_list and "價格" in cols_list:
-                    cols_list.remove("iSKU")
-                    cols_list.insert(cols_list.index("價格"), "iSKU")
-                    df_shopee = df_shopee[cols_list]
-                
-                df_valid_isku = df_shopee[df_shopee['iSKU'] != "蝦皮無iSKU"].copy()
-                df_isku_keep = df_valid_isku.sort_values(by=['iSKU', '價格', 'original_index']).drop_duplicates(subset=['iSKU'], keep='last')
-                df_gtin_check = df_isku_keep.copy()
-                df_gtin_check['GTIN_str'] = df_gtin_check['GTIN'].astype(str).str.strip().str.split('.').str[0]
-                df_gtin_keep = df_gtin_check[~df_gtin_check['GTIN_str'].isin(["", "00", "0", "nan"])].sort_values(by=['GTIN_str', '價格', 'original_index']).drop_duplicates(subset=['GTIN_str'], keep='last')
-                df_final_clean = pd.concat([df_gtin_keep, df_gtin_check[df_gtin_check['GTIN_str'].isin(["", "00", "0", "nan"])]]).sort_values(by='original_index')
-                                 
-                # 若非重複檔案，才寫入歷史紀錄避免 log 冗長
-                if not is_duplicate:
+                    def calc_isku_row(row):
+                        opt = str(row.get('商品選項貨號', '')).strip()
+                        main = str(row.get('主商品貨號', '')).strip()
+                        if opt in ["見選項", "null", "Null", "nan", "NaN", "None"]: opt = ""
+                        if main in ["見選項", "null", "Null", "nan", "NaN", "None"]: main = ""
+                        return opt if opt != "" else (main if main != "" else "蝦皮無iSKU")
+                        
+                    df_shopee['iSKU'] = df_shopee.apply(calc_isku_row, axis=1)
+                    df_shopee['original_index'] = df_shopee.index
+                    cols_list = list(df_shopee.columns)
+                    if "iSKU" in cols_list and "價格" in cols_list:
+                        cols_list.remove("iSKU")
+                        cols_list.insert(cols_list.index("價格"), "iSKU")
+                        df_shopee = df_shopee[cols_list]
+                    
+                    df_valid_isku = df_shopee[df_shopee['iSKU'] != "蝦皮無iSKU"].copy()
+                    df_isku_keep = df_valid_isku.sort_values(by=['iSKU', '價格', 'original_index']).drop_duplicates(subset=['iSKU'], keep='last')
+                    df_gtin_check = df_isku_keep.copy()
+                    df_gtin_check['GTIN_str'] = df_gtin_check['GTIN'].astype(str).str.strip().str.split('.').str[0]
+                    df_gtin_keep = df_gtin_check[~df_gtin_check['GTIN_str'].isin(["", "00", "0", "nan"])].sort_values(by=['GTIN_str', '價格', 'original_index']).drop_duplicates(subset=['GTIN_str'], keep='last')
+                    df_final_clean = pd.concat([df_gtin_keep, df_gtin_check[df_gtin_check['GTIN_str'].isin(["", "00", "0", "nan"])]]).sort_values(by='original_index')
+                                     
+                    # 🗑️ 刪除這裡原本的 out_buf_sp = io.BytesIO() 與 upload_or_update_gdrive_file，這是造成 NPE 的元凶！
+                    
+                    # 📝 只需要保留歷史紀錄與下方正確的 save_to_shopee_master_xlsm 呼叫
                     new_hist_log = pd.DataFrame([{"檔案名稱": uploaded_shopee.name, "md5": shopee_md5, "匯入時間": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}])
                     df_shopee_history = pd.concat([df_shopee_history, new_hist_log], ignore_index=True)
-                
-                if save_to_shopee_master_xlsm({"蝦皮商品列表": df_final_clean, "匯入檔案": df_shopee_history}):
-                    load_shopee_data.clear() 
-                    get_cached_gdrive_id.clear()
-                    st.session_state['shopee_clean'] = df_final_clean
-                    st.success(f"🎉 蝦皮賣場商品列表iSKU結構校正完成！\n🟢 雲端現有主表 `蝦皮賣場商品列表.xlsm` 已成功同步覆寫更新！")
                     
-            except Exception as e:
-                st.error(f"讀取或清洗蝦皮檔案失敗: {str(e)}")
+                    # 🟢 使用全域的安全寫入函數 (會自動處理 keep_vba=True 並呼叫 update API)
+                    if save_to_shopee_master_xlsm({"蝦皮商品列表": df_final_clean, "匯入檔案": df_shopee_history}):
+                        load_shopee_data.clear() 
+                        get_cached_gdrive_id.clear()
+                        st.session_state['shopee_clean'] = df_final_clean
+                        st.success(f"🎉 蝦皮賣場商品列表iSKU結構校正完成！\n🟢 雲端現有主表 `蝦皮賣場商品列表.xlsm` 已成功同步覆寫更新！")
+                        
+                        st.markdown("---")
+                        st.markdown("### ⚡ 後續自動化推薦操作")
+                        if st.button("🚀 馬上更新：以最新校正的蝦皮資料重新執行三表整合並回寫雲端", type="primary", use_container_width=True):
+                            with st.spinner("⏳ 正在重新整理跨表聯結數據並回寫..."):
+                                if run_powerquery_and_update_gdrive():
+                                    st.success("✅ 成功！雲端『商品蝦皮麗嬰價格統整表』已同步使用最新校正後的蝦皮資料覆寫更新！")
+                except Exception as e:
+                    st.error(f"讀取或清洗蝦皮檔案失敗: {str(e)}")
 
-    # 確保自動化操作獨立於檔案上傳按鈕邏輯外，校正完成後隨時可見
     if 'shopee_clean' in st.session_state:
-        st.markdown("---")
-        st.markdown("### ⚡ 後續自動化推薦操作")
-        
-        # 🌟 對應需求 3：以最新校正的蝦皮資料重新執行三表整合
-        if st.button("🚀 以最新校正的蝦皮資料重新執行三表整合並回寫雲端", type="primary", use_container_width=True):
-            with st.spinner("⏳ 正在重新整理跨表聯結數據並回寫..."):
-                if run_powerquery_and_update_gdrive():
-                    st.success("✅ 成功！雲端『商品蝦皮麗嬰價格統整表』已同步使用最新校正後的蝦皮資料覆寫更新！")
-
         st.dataframe(st.session_state['shopee_clean'], use_container_width=True)
         towrite_shopee = io.BytesIO()
         st.session_state['shopee_clean'].to_excel(towrite_shopee, index=False)
-        st.download_button(
-            label="📥 下載此次iSKU校正蝦皮報表 (.xlsx)", 
-            data=towrite_shopee.getvalue(), 
-            file_name=f"蝦皮清洗完成對齊表_{datetime.date.today().strftime('%Y%m%d')}.xlsx", 
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        st.download_button(label="📥 下載此次iSKU校正蝦皮報表 (.xlsx)", data=towrite_shopee.getvalue(), file_name=f"蝦皮清洗完成對齊表_{datetime.date.today().strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # -------------------------------------------------------------------------
 # 子功能 6：🔀 sitegiant 採購入庫單轉換
@@ -1526,52 +1635,3 @@ elif sub_page == "📦 SiteGiant 批量新增UPC":
                 type="primary",
                 use_container_width=True
             )
-# -------------------------------------------------------------------------
-# 子功能 10：📋 採購單待處理
-# -------------------------------------------------------------------------
-elif sub_page == "📋 採購單待處理":
-    st.subheader("📋 採購單待處理 (尚未建立商品清單)")
-    
-    # 目標雲端檔案 ID
-    TARGET_SHEET_ID = "1Ixp9V_u2yU8hiWhxQCHNDB4kPKlxDGD2"
-    
-    with st.spinner("⏳ 正在由雲端獲取待處理清單..."):
-        try:
-            # 💡 導入快取與 calamine 高速讀取
-            file_bytes = get_cached_gdrive_file_bytes(TARGET_SHEET_ID)
-            engine_kw = {"engine": "calamine"} if HAS_CALAMINE else {}
-            df_pending = pd.read_excel(io.BytesIO(file_bytes), sheet_name=0, dtype=str, **engine_kw)
-            
-            # 清理可能有空白的標題
-            df_pending.columns = df_pending.columns.astype(str).str.strip()
-            
-            if df_pending.empty:
-                st.success("🎉 太棒了！目前沒有任何待處理的異常商品與採購單。")
-            else:
-                st.markdown(f"📊 **目前待處理總筆數**：`{len(df_pending)} 筆`")
-                st.info("💡 下方為過去轉換入庫單時，找不到雲端統整表對應紀錄的異常商品，請調閱並盡速前往建立或更新資料。")
-                
-                # 在畫面上渲染預覽表
-                st.dataframe(df_pending, use_container_width=True)
-                
-                # 提供下載最新清單的功能
-                towrite_pending = io.BytesIO()
-                with pd.ExcelWriter(towrite_pending, engine='openpyxl') as writer:
-                    df_pending.to_excel(writer, index=False, sheet_name="尚未建立商品清單")
-                
-                st.download_button(
-                    label="📥 下載待處理清單報表 (.xlsx)",
-                    data=towrite_pending.getvalue(),
-                    file_name=f"尚未建立商品清單_匯出_{datetime.date.today().strftime('%Y%m%d')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
-                )
-                
-                # (選用) 加入重新載入按鈕，方便使用者若手動去雲端改完，可以馬上刷新快取
-                if st.button("🔄 重新載入最新雲端資料", use_container_width=True):
-                    get_cached_gdrive_file_bytes.clear()
-                    st.rerun()
-                    
-        except Exception as e:
-            st.error("❌ 讀取雲端清單失敗，可能是該檔案尚未被系統自動建立或權限不足。")
-            st.warning(f"🔍 系統詳細報錯訊息：`{str(e)}`")  # 👈 加入這行可看見實際 API 錯誤代碼 (如 404/403)
