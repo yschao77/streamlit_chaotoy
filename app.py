@@ -1712,5 +1712,5 @@ elif sub_page == "📋 採購單待處理":
                     st.rerun()
                     
         except Exception as e:
-            st.error(f"❌ 讀取雲端清單失敗，可能是該檔案尚未被系統自動建立或權限不足。")
-            st.warning(f"詳細錯誤訊息: {str(e)}")
+            st.error("❌ 讀取雲端清單失敗，可能是該檔案尚未被系統自動建立或權限不足。")
+            st.warning(f"🔍 系統詳細報錯訊息：`{str(e)}`")  # 👈 加入這行可看見實際 API 錯誤代碼 (如 404/403)
