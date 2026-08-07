@@ -169,3 +169,19 @@ def process_smart_headers(df_raw, header_row_idx):
         return new_cols
     else:
         return [str(col).strip() for col in df_raw.iloc[header_row_idx].fillna("")]
+
+# =========================================================================
+# 📦 4. 資料庫共用載入常式
+# =========================================================================
+@st.cache_data(ttl=600)
+def load_shopee_data(file_id):
+    """延遲載入並快取蝦皮主表資料"""
+    if not file_id: return pd.DataFrame(columns=["檔案名稱", "md5", "匯入時間"]), pd.DataFrame()
+    try:
+        shopee_bytes = download_gdrive_file_to_bytes(file_id)
+        with pd.ExcelFile(shopee_bytes) as shopee_xls:
+            df_hist = pd.read_excel(shopee_xls, "匯入檔案") if "匯入檔案" in shopee_xls.sheet_names else pd.DataFrame(columns=["檔案名稱", "md5", "匯入時間"])
+            df_list = pd.read_excel(shopee_xls, "蝦皮商品列表") if "蝦皮商品列表" in shopee_xls.sheet_names else pd.DataFrame()
+        return df_hist, df_list
+    except Exception:
+        return pd.DataFrame(columns=["檔案名稱", "md5", "匯入時間"]), pd.DataFrame()
