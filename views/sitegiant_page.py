@@ -198,82 +198,81 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
                                     "分類定義": category, "產品關鍵字": keywords
                                 })
                                 
-                            if missing_items:
                             # =========================================================
                             # 🔄 同步更新「尚未建立商品清單」(包含自動清理與新增)
                             # =========================================================
-                                try:
-                                    TARGET_SHEET_ID = "1Ixp9V_u2yU8hiWhxQCHNDB4kPKlxDGD2"
+                            try:
+                                TARGET_SHEET_ID = "1Ixp9V_u2yU8hiWhxQCHNDB4kPKlxDGD2"
                                 
                                 # 1. 取得雲端最新清單
-                                    try:
-                                        raw_bytes = download_gdrive_file_to_bytes(TARGET_SHEET_ID)
-                                        engine_kw = {"engine": "calamine"} if HAS_CALAMINE else {}
-                                        df_missing = pd.read_excel(raw_bytes, sheet_name=0, dtype=str, **engine_kw)
-                                    except Exception:
-                                        df_missing = pd.DataFrame(columns=["採購單檔名", "國際條碼", "狀況", "狀態", "建立時間"])
-
-                                    df_missing.columns = df_missing.columns.astype(str).str.strip()
-                                    changed = False  # 追蹤檔案是否需要重新上傳
+                                try:
+                                    raw_bytes = download_gdrive_file_to_bytes(TARGET_SHEET_ID)
+                                    engine_kw = {"engine": "calamine"} if HAS_CALAMINE else {}
+                                    df_missing = pd.read_excel(raw_bytes, sheet_name=0, dtype=str, **engine_kw)
+                                except Exception:
+                                    df_missing = pd.DataFrame(columns=["採購單檔名", "國際條碼", "狀況", "狀態", "建立時間"])
+                                    
+                                df_missing.columns = df_missing.columns.astype(str).str.strip()
+                                changed = False  
                                 
-                                # 2. 🧹 執行同步移除：找出本次入庫單的條碼，若狀態不是待處理，則移除
-                                    if "國際條碼" in df_missing.columns and "狀態" in df_missing.columns:
-                                        # 從本次輸入的入庫單中清洗並提取所有條碼
-                                        input_barcodes = [clean_barcode(b) for b in input_df['國際條碼'].tolist() if pd.notna(b)]
-                                        # 建立比對專用欄位，確保精準命中
-                                        df_missing['_clean_barcode'] = df_missing['國際條碼'].apply(clean_barcode)
+                                # 2. 🧹 執行同步移除
+                                if "國際條碼" in df_missing.columns and "狀態" in df_missing.columns:
+                                    input_barcodes = set(clean_barcode(b) for b in input_df['國際條碼'].tolist() if pd.notna(b))
+                                    current_missing_barcodes = set(clean_barcode(item['國際條碼']) for item in missing_items)
+                                    df_missing['_clean_barcode'] = df_missing['國際條碼'].apply(clean_barcode)
                                     
-                                        # 條件：條碼在入庫單中，且狀態不等於 '待處理'
-                                        mask_to_remove = (df_missing['_clean_barcode'].isin(input_barcodes)) & (df_missing['狀態'].astype(str).str.strip() != '待處理')
-                                        removed_count = mask_to_remove.sum()
+                                    cond_auto_resolved = df_missing['_clean_barcode'].apply(
+                                        lambda x: (x in input_barcodes) and (x not in current_missing_barcodes)
+                                    )
                                     
-                                        if removed_count > 0:
-                                            df_missing = df_missing[~mask_to_remove]  # 剔除符合條件的列
-                                            st.toast(f"🧹 已同步從清單中自動清理 {removed_count} 筆非待處理的商品！", icon="✅")
-                                            changed = True
+                                    status_col = df_missing['狀態'].astype(str).str.strip()
+                                    cond_manual_resolved = (status_col != '待處理') & (~status_col.isin(['nan', 'None', '', 'NaN']))
+                                    
+                                    mask_to_remove = cond_auto_resolved | cond_manual_resolved
+                                    removed_count = mask_to_remove.sum()
+                                    
+                                    if removed_count > 0:
+                                        df_missing = df_missing[~mask_to_remove] 
+                                        st.toast(f"🧹 已同步從清單中自動清理 {removed_count} 筆已解決的商品！", icon="✅")
+                                        changed = True
                                         
-                                        df_missing = df_missing.drop(columns=['_clean_barcode'])
+                                    df_missing = df_missing.drop(columns=['_clean_barcode'])
                                 
-                                    # 3. 🚨 執行新增：將本次產生新的 missing_items 加入
-                                    if missing_items:
-                                        if "採購單檔名" in df_missing.columns and "國際條碼" in df_missing.columns:
-                                            existing_keys = set(
-                                                df_missing["採購單檔名"].astype(str).str.strip() + "_" + 
-                                                df_missing["國際條碼"].astype(str).str.strip()
-                                            )
-                                        else:
-                                            existing_keys = set()
+                                # 3. 🚨 執行新增
+                                if missing_items:
+                                    if "採購單檔名" in df_missing.columns and "國際條碼" in df_missing.columns:
+                                        existing_keys = set(df_missing["採購單檔名"].astype(str).str.strip() + "_" + df_missing["國際條碼"].astype(str).str.strip())
+                                    else:
+                                        existing_keys = set()
                                     
-                                        new_missing_items = []
-                                        for item in missing_items:
-                                            item_key = f"{item['採購單檔名']}_{item['國際條碼']}"
-                                            if item_key not in existing_keys:
-                                                new_missing_items.append(item)
-                                                existing_keys.add(item_key)
+                                    new_missing_items = []
+                                    for item in missing_items:
+                                        item_key = f"{item['採購單檔名']}_{item['國際條碼']}"
+                                        if item_key not in existing_keys:
+                                            new_missing_items.append(item)
+                                            existing_keys.add(item_key)
                                     
-                                        if new_missing_items:
-                                            df_new_rows = pd.DataFrame(new_missing_items)
-                                            df_missing = pd.concat([df_missing, df_new_rows], ignore_index=True)
-                                            st.toast(f"🚨 已自動將 {len(new_missing_items)} 筆異常紀錄新增至待處理清單！", icon="⚠️")
-                                            changed = True
+                                    if new_missing_items:
+                                        df_new_rows = pd.DataFrame(new_missing_items)
+                                        df_missing = pd.concat([df_missing, df_new_rows], ignore_index=True)
+                                        st.toast(f"🚨 已自動將 {len(new_missing_items)} 筆異常紀錄新增至待處理清單！", icon="⚠️")
+                                        changed = True
                                 
-                                    # 4. 💾 如果資料有變動（有移除或有新增），上傳回 Google Drive
-                                    if changed:
-                                        output_stream = io.BytesIO()
-                                        with pd.ExcelWriter(output_stream, engine='openpyxl') as writer:
-                                            df_missing.to_excel(writer, index=False, sheet_name="尚未建立商品清單")
-                                        output_stream.seek(0)
-
-                                        upload_or_update_gdrive_file(
-                                            folder_id=None,
-                                            file_name="尚未建立商品清單.xlsx", 
-                                            file_bytes=output_stream.getvalue(),
-                                            existing_file_id=TARGET_SHEET_ID
-                                        )
+                                # 4. 💾 上傳回 Google Drive
+                                if changed:
+                                    output_stream = io.BytesIO()
+                                    with pd.ExcelWriter(output_stream, engine='openpyxl') as writer:
+                                        df_missing.to_excel(writer, index=False, sheet_name="尚未建立商品清單")
+                                    output_stream.seek(0)
                                     
-                                except Exception as log_err:
-                                    st.error(f"⚠️ 同步更新「尚未建立商品清單」失敗: {str(log_err)}")
-                                # =========================================================        
+                                    upload_or_update_gdrive_file(
+                                        folder_id=None,
+                                        file_name="尚未建立商品清單.xlsx", 
+                                        file_bytes=output_stream.getvalue(),
+                                        existing_file_id=TARGET_SHEET_ID
+                                    )
+                            except Exception as log_err:
+                                st.error(f"⚠️ 同步更新「尚未建立商品清單」失敗: {str(log_err)}")   
                                     
                             if result_rows:
                                 st.session_state['inward_result_df'] = pd.DataFrame(result_rows)
