@@ -1,0 +1,50 @@
+---
+description: 本專案 Python 慣例：共用函式、條碼、錯誤處理
+globs: "**/*.py"
+alwaysApply: false
+---
+
+# Python 慣例
+
+## 共用函式只維護一份
+
+讀寫、清洗、快取放 `utils.py`。頁面 `from utils import ...`。不要在 `app.py` 或 `views/` 再定義同名函式。
+
+```python
+# ❌ BAD — 在頁面重寫清洗
+def clean_barcode(val):
+    return str(val).split(".")[0]
+
+# ✅ GOOD
+from utils import clean_barcode
+df["條碼"] = df["條碼"].map(clean_barcode)
+```
+
+`save_to_master_xlsm` / `save_to_shopee_master_xlsm` 以 `utils.py` 簽名為準（含 `file_id`, `folder_id`, `file_name`）。
+
+## 條碼當文字
+
+Excel 常把條碼變成 `471...0` 或科學記號。顯示與比對前一律 `clean_barcode`，寫回 xlsm 時條碼欄用文字格式 `@`。
+
+## 錯誤處理
+
+使用者看得到的失敗用 `st.error`（可加 `st.info` 提示）；不要空的 `except: pass`。Drive 連線失敗可 `st.stop()`。
+
+```python
+# ❌ BAD
+try:
+    load_master_data(file_id)
+except Exception:
+    pass
+
+# ✅ GOOD
+try:
+    return load_master_data(file_id)
+except Exception as e:
+    st.error(f"🔴 讀取雲端主資料庫失敗。錯誤: {str(e)}")
+    return None
+```
+
+## 依賴
+
+沿用 `requirements.txt`：streamlit、pandas、openpyxl、Drive API、python-calamine。不要無故加套件。`views/` 既有的 `sys.path` 補丁可保留，新檔不要再複製一份。

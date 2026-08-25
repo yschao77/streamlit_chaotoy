@@ -1,0 +1,39 @@
+---
+description: Google Drive 與 Excel/xlsm 讀寫：不新建檔、保留 VBA、條碼文字
+globs: "**/*.py"
+alwaysApply: false
+---
+
+# Google Drive 與 Excel
+
+## 連線與檔案 ID
+
+- Service：`st.secrets["textkey"]` + Drive scope；`@st.cache_resource`
+- 資料夾/檔名關鍵字常數集中在 `app.py`（`ID_*_FOLDER`、`get_cached_gdrive_id`）
+- 用 `name contains` 找現有檔，**禁止 API 新建檔**（配額/權限）；沒有 `existing_file_id` 就 `st.error` + `st.stop()`
+
+```python
+# ❌ BAD
+service.files().create(body={"name": name, "parents": [folder_id]}, media_body=media).execute()
+
+# ✅ GOOD
+upload_or_update_gdrive_file(folder_id, file_name, file_bytes, existing_file_id=file_id)
+```
+
+MIME：`.xlsm` → `application/vnd.ms-excel.sheet.macroEnabled.12`；其餘 xlsx 用 openxml。時間顯示加 8 小時（`format_gdrive_time`）。
+
+## 讀寫引擎
+
+- **只讀查詢**：有 calamine 可用 `engine="calamine"`
+- **要寫回 xlsm**：`openpyxl.load_workbook(..., keep_vba=True)`，寫完再 `upload_or_update_gdrive_file`
+- 更新工作表：清空列 → `append` 欄名與列；有「條碼」欄則寫入前清洗，儲存格 `number_format = '@'`
+
+## 工作表名稱（必須對得上）
+
+| 檔案 | 工作表 |
+|------|--------|
+| 麗嬰採購產品總表.xlsm | `麗嬰國際產品總表`、`已處理採購單`、`刪除紀錄`、`metadata` |
+| 蝦皮賣場商品列表.xlsm | `蝦皮商品列表`、`匯入檔案` |
+| 商品蝦皮麗嬰價格統整表.xlsx | `商品蝦皮麗嬰價格統整表` |
+
+匯入去重用檔案 `md5`。三表對鍵：內部 `自定義編碼`↔蝦皮 `iSKU`；內部 `c`↔麗嬰 `條碼`。

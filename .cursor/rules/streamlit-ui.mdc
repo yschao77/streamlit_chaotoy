@@ -1,0 +1,41 @@
+---
+description: Streamlit 頁面結構、側邊欄路由、中文 UI 與快取
+globs: app.py,views/**/*.py
+alwaysApply: false
+---
+
+# Streamlit UI
+
+## 結構
+
+- `st.set_page_config(..., layout="wide")` 只在 `app.py`
+- 側邊欄：`selectbox` 選模組 → `radio` 選子頁
+- 子頁只做 `render(...)`，開頭固定標題 + 麵包屑，不要自己再做一套導覽
+
+```python
+# ✅ GOOD
+def render(sub_page, cfg):
+    st.title(f"{sub_page}")
+    st.info(f"目前導覽路徑： 📦 商品蝦皮麗嬰統整管理 ➔ {sub_page}")
+    if sub_page == "🧠 PowerQuery 執行三表整合":
+        ...
+```
+
+## 兩個模組（標籤字串必須對得上 `if sub_page ==`）
+
+1. Sitegiant：採購入庫轉換、歷史入庫、批量 UPC、採購單待處理
+2. 統整管理：三表整合、麗嬰合併審核、蝦皮清單轉換、歷史/查詢
+
+新子頁：先加 `radio` 選項，再在對應 `views/*.py` 加分支。`integration_page.render(sub_page, gdrive_cfg)`；`sitegiant_page` 傳個別 Drive ID。
+
+## 畫面慣例
+
+- UI 用繁中 + 既有 emoji 標籤（📝📅📋 等），不要改成英文
+- 表單用 `st.columns`；主操作按鈕 `use_container_width=True`
+- 跨 rerun 的資料放 `st.session_state`（既有：`inward_input_df`、`pq_result`），key 保持穩定
+
+## 快取
+
+- Drive service：`@st.cache_resource`
+- 檔案 bytes / 主表：`@st.cache_data(ttl=600)`（ID 查詢可用 ttl=3600）
+- 寫入雲端成功後，該清的 cache 要清，避免畫面仍是舊檔
