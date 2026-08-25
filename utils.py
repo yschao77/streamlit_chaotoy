@@ -4,6 +4,9 @@ import openpyxl
 import hashlib
 import datetime
 import io
+import os
+import re
+import json
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
@@ -52,52 +55,148 @@ HAS_CALAMINE = check_calamine()
 # =========================================================================
 # 🌐 1. Google Drive 雲端連線初始化
 # =========================================================================
+DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
+XLSX_MIME_QUERY = (
+    "(mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' "
+    "or mimeType = 'application/vnd.ms-excel.sheet.macroEnabled.12')"
+)
+BATCH_EDIT_DATE_RE = re.compile(r"batch_edit_basic_info_all_(\d{2})-(\d{2})-(\d{4})", re.I)
+MASS_UPDATE_DATE_RE = re.compile(r"mass_update_sales_info_3062950_(\d{8})", re.I)
+
+
+def _in_streamlit():
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        return get_script_run_ctx() is not None
+    except Exception:
+        return False
+
+
+def _notify_error(msg):
+    if _in_streamlit():
+        st.error(msg)
+    else:
+        print(msg)
+
+
+def _stop_or_raise(msg):
+    _notify_error(msg)
+    if _in_streamlit():
+        st.stop()
+    raise RuntimeError(msg)
+
+
+def load_google_service_account_info():
+    env_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+    if env_json:
+        return json.loads(env_json)
+    env_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if env_path and os.path.isfile(env_path):
+        with open(env_path, encoding="utf-8") as f:
+            return json.load(f)
+    try:
+        return dict(st.secrets["textkey"])
+    except Exception:
+        return None
+
+
+def _build_drive_service():
+    info = load_google_service_account_info()
+    if not info:
+        raise RuntimeError("缺少 Google 憑證：請設定 GOOGLE_SERVICE_ACCOUNT_JSON 或 Streamlit Secrets `textkey`。")
+    credentials = service_account.Credentials.from_service_account_info(info, scopes=DRIVE_SCOPES)
+    return build("drive", "v3", credentials=credentials)
+
+
 @st.cache_resource
 def init_drive_service():
-    """讀取部署後設定在 Streamlit Secrets 的金鑰字典並建立雲端連線"""
     try:
-        google_secrets = st.secrets["textkey"]
-        credentials = service_account.Credentials.from_service_account_info(
-            google_secrets,
-            scopes=["https://www.googleapis.com/auth/drive"]
-        )
-        return build('drive', 'v3', credentials=credentials)
+        return _build_drive_service()
     except Exception as e:
-        st.error(f"❌ 無法從 Streamlit Secrets 中讀取 `textkey` 憑證。錯誤訊息: {str(e)}")
-        st.info("💡 請確認您的 Secrets 設定格式是否正確。")
-        st.stop()
+        if _in_streamlit():
+            st.error(f"❌ 無法讀取 Google Drive 憑證。錯誤訊息: {str(e)}")
+            st.info("💡 請確認 Secrets `textkey` 或環境變數 GOOGLE_SERVICE_ACCOUNT_JSON。")
+            st.stop()
+        raise
 
-# 建立全域 service 供下方工具使用
-service = init_drive_service()
+
+def get_drive_service():
+    if _in_streamlit():
+        return init_drive_service()
+    return _build_drive_service()
 
 # =========================================================================
 # 🔍 2. 雲端核心實戰工具與搜尋常式
 # =========================================================================
+def _list_gdrive_files_raw(folder_id, name_contains=None):
+    query = f"'{folder_id}' in parents and {XLSX_MIME_QUERY} and trashed = false"
+    if name_contains:
+        query += f" and name contains '{name_contains}'"
+    files = []
+    page_token = None
+    while True:
+        results = get_drive_service().files().list(
+            q=query,
+            fields="nextPageToken, files(id, name, modifiedTime)",
+            pageSize=100,
+            pageToken=page_token,
+        ).execute()
+        files.extend(results.get("files", []))
+        page_token = results.get("nextPageToken")
+        if not page_token:
+            break
+    return files
+
+
 @st.cache_data(ttl=3600)
 def get_cached_gdrive_id(folder_id, file_name_keyword):
     try:
-        query = f"'{folder_id}' in parents and name contains '{file_name_keyword}' and trashed = false"
-        results = service.files().list(q=query, fields="files(id, name, modifiedTime)", pageSize=1).execute()
-        files = results.get('files', [])
+        files = _list_gdrive_files_raw(folder_id, name_contains=file_name_keyword)
         if files:
-            return files[0]['id'], files[0]['modifiedTime'], files[0]['name']
+            files.sort(key=lambda x: x.get("modifiedTime") or "", reverse=True)
+            return files[0]["id"], files[0]["modifiedTime"], files[0]["name"]
     except Exception:
         pass
     return None, None, None
 
-def list_gdrive_files(folder_id):
+def list_gdrive_files(folder_id, name_contains=None):
     try:
-        query = f"'{folder_id}' in parents and (mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' or mimeType = 'application/vnd.ms-excel.sheet.macroEnabled.12') and trashed = false"
-        results = service.files().list(q=query, fields="files(id, name, modifiedTime)").execute()
-        files = results.get('files', [])
-        files.sort(key=lambda x: x['name'], reverse=True)
+        files = _list_gdrive_files_raw(folder_id, name_contains=name_contains)
+        files.sort(key=lambda x: x["name"], reverse=True)
         return files
     except Exception as e:
-        st.error(f"掃描雲端資料夾失敗: {str(e)}")
+        _notify_error(f"掃描雲端資料夾失敗: {str(e)}")
         return []
 
+
+def _parse_named_file_date(name, kind):
+    if kind == "batch_edit":
+        m = BATCH_EDIT_DATE_RE.search(name or "")
+        if m:
+            return datetime.date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+    elif kind == "mass_update":
+        m = MASS_UPDATE_DATE_RE.search(name or "")
+        if m:
+            return datetime.datetime.strptime(m.group(1), "%Y%m%d").date()
+    return None
+
+
+def pick_latest_gdrive_file(folder_id, name_contains, kind):
+    """依檔名內日期取最新檔；同日再用 modifiedTime。"""
+    files = list_gdrive_files(folder_id, name_contains=name_contains)
+    ranked = []
+    for f in files:
+        file_date = _parse_named_file_date(f.get("name"), kind)
+        if file_date:
+            ranked.append((file_date, f.get("modifiedTime") or "", f))
+    if not ranked:
+        return None
+    ranked.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    return ranked[0][2]
+
+
 def download_gdrive_file_to_bytes(file_id):
-    request = service.files().get_media(fileId=file_id)
+    request = get_drive_service().files().get_media(fileId=file_id)
     file_stream = io.BytesIO()
     downloader = MediaIoBaseDownload(file_stream, request)
     done = False
@@ -123,11 +222,9 @@ def upload_or_update_gdrive_file(folder_id, file_name, file_bytes, existing_file
     media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype=mime_type, resumable=True)
     
     if existing_file_id:
-        service.files().update(fileId=existing_file_id, media_body=media, supportsAllDrives=True).execute()
+        get_drive_service().files().update(fileId=existing_file_id, media_body=media, supportsAllDrives=True).execute()
         return existing_file_id
-    else:
-        st.error(f"❌ 拒絕建立新檔案【{file_name}】！為避免 Google 空間配額與權限錯誤，請先手動於雲端建立該檔案。")
-        st.stop()
+    _stop_or_raise(f"❌ 拒絕建立新檔案【{file_name}】！為避免 Google 空間配額與權限錯誤，請先手動於雲端建立該檔案。")
 
 def format_gdrive_time(time_str):
     if not time_str: return "❌ 雲端檔案尚未建立/不存在"
@@ -190,11 +287,10 @@ def load_shopee_data(file_id):
 # =========================================================================
 # 💾 5. 核心資料庫讀寫與勾稽常式
 # =========================================================================
-import openpyxl
 
 def save_to_master_xlsm(sheets_dict, file_id, folder_id, file_name):
     if not file_id:
-        st.error(f"❌ 雲端找不到核心總表檔案")
+        _notify_error("❌ 雲端找不到核心總表檔案")
         return False
     try:
         master_bytes = download_gdrive_file_to_bytes(file_id)
@@ -222,7 +318,7 @@ def save_to_master_xlsm(sheets_dict, file_id, folder_id, file_name):
         upload_or_update_gdrive_file(folder_id, file_name or "麗嬰採購產品總表.xlsm", out_buf.getvalue(), existing_file_id=file_id)
         return True
     except Exception as e:
-        st.error(f"❌ 寫入雲端資料庫發生錯誤: {str(e)}")
+        _notify_error(f"❌ 寫入雲端資料庫發生錯誤: {str(e)}")
         return False
 
 def save_to_shopee_master_xlsm(sheets_dict, file_id, folder_id, file_name):
@@ -254,7 +350,7 @@ def save_to_shopee_master_xlsm(sheets_dict, file_id, folder_id, file_name):
         )
         return True
     except Exception as e:
-        st.error(f"❌ 寫入雲端蝦皮資料庫發生錯誤: {str(e)}")
+        _notify_error(f"❌ 寫入雲端蝦皮資料庫發生錯誤: {str(e)}")
         return False
 
 def run_cross_matching(df):
@@ -327,5 +423,158 @@ def load_master_data(file_id):
         current_max_uid = int(df_meta.iloc[0, 0]) if not df_meta.empty else 3473
         return df_total, df_history, df_delete_log, df_meta, all_sheets, current_max_uid
     except Exception as e:
-        st.error(f"🔴 讀取雲端主資料庫失敗。錯誤: {str(e)}")
+        _notify_error(f"🔴 讀取雲端主資料庫失敗。錯誤: {str(e)}")
         return None, None, None, None, None, 3473
+
+
+def _file_payload_bytes(file_bytes):
+    if isinstance(file_bytes, io.BytesIO):
+        file_bytes.seek(0)
+        data = file_bytes.getvalue()
+        file_bytes.seek(0)
+        return data
+    return file_bytes
+
+
+def load_sitegiant_batch_name_map(folder_id):
+    """c/UPC -> 庫存貨品名稱，以及選到的 batch_edit 檔案 metadata。"""
+    latest = pick_latest_gdrive_file(folder_id, "batch_edit_basic_info_all", "batch_edit")
+    if not latest:
+        return {}, None
+    engine_kw = {"engine": "calamine"} if HAS_CALAMINE else {}
+    df = pd.read_excel(download_gdrive_file_to_bytes(latest["id"]), dtype=str, **engine_kw)
+    df.columns = df.columns.astype(str).str.strip().str.replace("\n", "")
+    upc_col = next((c for c in df.columns if "國際條碼" in c or c.upper() == "UPC"), None)
+    name_col = "庫存貨品名稱" if "庫存貨品名稱" in df.columns else None
+    if not upc_col or not name_col:
+        return {}, latest
+    df["_upc"] = df[upc_col].map(clean_barcode)
+    df["_name"] = df[name_col].astype(str).str.strip()
+    df = df[(df["_upc"] != "") & (~df["_name"].isin(["", "nan", "None"]))]
+    df = df.drop_duplicates(subset=["_upc"], keep="last")
+    return dict(zip(df["_upc"], df["_name"])), latest
+
+
+def build_price_summary_df(master_file_id, local_prod_id, shopee_master_id, sitegiant_batch_folder_id=None):
+    """三表整合 + 以 c=UPC 填入 sitegiant庫存SKU（庫存貨品名稱）。"""
+    engine_kw = {"engine": "calamine"} if HAS_CALAMINE else {}
+    df_liying = pd.read_excel(download_gdrive_file_to_bytes(master_file_id), sheet_name="麗嬰國際產品總表", **engine_kw)
+    df_p = pd.read_excel(download_gdrive_file_to_bytes(local_prod_id), sheet_name=0, **engine_kw)
+    df_s = pd.read_excel(download_gdrive_file_to_bytes(shopee_master_id), sheet_name="蝦皮商品列表", **engine_kw)
+
+    df_liying["條碼"] = df_liying["條碼"].astype(str).str.strip().str.split(".").str[0]
+    df_p["自定義編碼"] = df_p["自定義編碼"].astype(str).str.strip().str.split(".").str[0]
+    df_s["iSKU"] = df_s["iSKU"].astype(str).str.strip().str.split(".").str[0]
+
+    if "商品名稱" in df_p.columns:
+        df_p = df_p.rename(columns={"商品名稱": "內部商品名稱"})
+
+    df_merge1 = pd.merge(df_p, df_s[["商品名稱", "iSKU", "GTIN", "價格"]], left_on="自定義編碼", right_on="iSKU", how="left")
+    df_merge1 = df_merge1.rename(columns={"商品名稱": "蝦皮商品名稱", "GTIN": "蝦皮GTIN", "價格": "蝦皮售價"})
+    df_merge1["c"] = df_merge1["c"].astype(str).str.strip().str.split(".").str[0]
+
+    df_final = pd.merge(df_merge1, df_liying[["條碼", "零售價", "含稅"]], left_on="c", right_on="條碼", how="left")
+    df_final = df_final.rename(columns={"零售價": "麗嬰零售價", "含稅": "麗嬰批發含稅價", "條碼": "麗嬰條碼"})
+    df_final["麗嬰商品"] = df_final["麗嬰條碼"].apply(lambda x: None if pd.isna(x) else "v")
+
+    for c in ["蝦皮售價", "麗嬰零售價", "麗嬰批發含稅價"]:
+        df_final[c] = pd.to_numeric(df_final[c], errors="coerce")
+
+    df_final["麗嬰零售八折"] = df_final["麗嬰零售價"] * 0.8
+    df_final["麗嬰八折比蝦皮貴"] = df_final.apply(
+        lambda r: "v" if (pd.notna(r["麗嬰零售八折"]) and pd.notna(r["蝦皮售價"]) and r["麗嬰零售八折"] > r["蝦皮售價"]) else None,
+        axis=1,
+    )
+    df_final["麗嬰未稅價"] = df_final["麗嬰批發含稅價"].apply(lambda x: round(x / 1.05, 2) if pd.notna(x) else None)
+    df_final["麗嬰稅款"] = df_final.apply(
+        lambda r: round(r["麗嬰批發含稅價"] - r["麗嬰未稅價"], 2) if (pd.notna(r["麗嬰批發含稅價"]) and pd.notna(r["麗嬰未稅價"])) else None,
+        axis=1,
+    )
+
+    name_map, batch_meta = {}, None
+    if sitegiant_batch_folder_id:
+        name_map, batch_meta = load_sitegiant_batch_name_map(sitegiant_batch_folder_id)
+    df_final["sitegiant庫存SKU"] = df_final["c"].map(lambda x: name_map.get(clean_barcode(x)) if pd.notna(x) else None)
+
+    return df_final.drop(columns=["iSKU"], errors="ignore"), batch_meta
+
+
+def correct_shopee_isku(file_bytes):
+    payload = _file_payload_bytes(file_bytes)
+    df_shopee_raw = pd.read_excel(io.BytesIO(payload), header=None, engine="openpyxl")
+    if df_shopee_raw.shape[1] >= 11:
+        df_shopee_raw.drop(df_shopee_raw.columns[10], axis=1, inplace=True)
+    shopee_headers = df_shopee_raw.iloc[2].astype(str).str.strip().tolist()
+    df_shopee = df_shopee_raw.iloc[6:].copy()
+    df_shopee.columns = shopee_headers
+    df_shopee.reset_index(drop=True, inplace=True)
+
+    def calc_isku_row(row):
+        opt = str(row.get("商品選項貨號", "")).strip()
+        main = str(row.get("主商品貨號", "")).strip()
+        if opt in ["見選項", "null", "Null", "nan", "NaN", "None"]:
+            opt = ""
+        if main in ["見選項", "null", "Null", "nan", "NaN", "None"]:
+            main = ""
+        return opt if opt != "" else (main if main != "" else "蝦皮無iSKU")
+
+    df_shopee["iSKU"] = df_shopee.apply(calc_isku_row, axis=1)
+    df_shopee["original_index"] = df_shopee.index
+    cols_list = list(df_shopee.columns)
+    if "iSKU" in cols_list and "價格" in cols_list:
+        cols_list.remove("iSKU")
+        cols_list.insert(cols_list.index("價格"), "iSKU")
+        df_shopee = df_shopee[cols_list]
+
+    df_valid_isku = df_shopee[df_shopee["iSKU"] != "蝦皮無iSKU"].copy()
+    df_isku_keep = df_valid_isku.sort_values(by=["iSKU", "價格", "original_index"]).drop_duplicates(subset=["iSKU"], keep="last")
+    df_gtin_check = df_isku_keep.copy()
+    df_gtin_check["GTIN_str"] = df_gtin_check["GTIN"].astype(str).str.strip().str.split(".").str[0]
+    df_gtin_keep = df_gtin_check[~df_gtin_check["GTIN_str"].isin(["", "00", "0", "nan"])].sort_values(
+        by=["GTIN_str", "價格", "original_index"]
+    ).drop_duplicates(subset=["GTIN_str"], keep="last")
+    return pd.concat(
+        [df_gtin_keep, df_gtin_check[df_gtin_check["GTIN_str"].isin(["", "00", "0", "nan"])]]
+    ).sort_values(by="original_index")
+
+
+def taipei_now():
+    return datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))
+
+
+def shopee_imported_today(df_hist):
+    if df_hist is None or df_hist.empty or "匯入時間" not in df_hist.columns:
+        return False
+    today = taipei_now().strftime("%Y-%m-%d")
+    return df_hist["匯入時間"].astype(str).str.startswith(today).any()
+
+
+def apply_shopee_isku_from_source(file_bytes, source_name, shopee_master_id, shopee_folder_id, shopee_file_name):
+    payload = _file_payload_bytes(file_bytes)
+    md5 = calculate_md5(payload)
+    df_hist, _ = load_shopee_data(shopee_master_id)
+    if df_hist is None:
+        df_hist = pd.DataFrame(columns=["檔案名稱", "md5", "匯入時間"])
+    if not df_hist.empty and "md5" in df_hist.columns and md5 in df_hist["md5"].astype(str).values:
+        return {"ok": False, "reason": "duplicate", "md5": md5, "name": source_name, "df": None}
+
+    df_clean = correct_shopee_isku(payload)
+    imported_at = taipei_now().strftime("%Y-%m-%d %H:%M:%S")
+    new_hist = pd.concat(
+        [df_hist, pd.DataFrame([{"檔案名稱": source_name, "md5": md5, "匯入時間": imported_at}])],
+        ignore_index=True,
+    )
+    saved = save_to_shopee_master_xlsm(
+        {"蝦皮商品列表": df_clean, "匯入檔案": new_hist},
+        shopee_master_id,
+        shopee_folder_id,
+        shopee_file_name,
+    )
+    return {
+        "ok": bool(saved),
+        "reason": None if saved else "save_failed",
+        "md5": md5,
+        "name": source_name,
+        "imported_at": imported_at,
+        "df": df_clean if saved else None,
+    }

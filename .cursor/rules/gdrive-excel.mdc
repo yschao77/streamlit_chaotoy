@@ -8,27 +8,21 @@ alwaysApply: false
 
 ## 連線與檔案 ID
 
-- Service：`st.secrets["textkey"]` + Drive scope；`@st.cache_resource`
-- 資料夾/檔名關鍵字常數集中在 `app.py`（`ID_*_FOLDER`、`get_cached_gdrive_id`）
-- 用 `name contains` 找現有檔，**禁止 API 新建檔**（配額/權限）；沒有 `existing_file_id` 就 `st.error` + `st.stop()`
+- Service：`st.secrets["textkey"]`，CLI / GitHub Actions 用 `GOOGLE_SERVICE_ACCOUNT_JSON`
+- 資料夾常數在 `app.py`。**禁止 API 新建檔**；沒有 `existing_file_id` 就停止。
+- 選最新檔用 `pick_latest_gdrive_file`（解析檔名日期，不要只靠檔名排序）
 
-```python
-# ❌ BAD
-service.files().create(body={"name": name, "parents": [folder_id]}, media_body=media).execute()
-
-# ✅ GOOD
-upload_or_update_gdrive_file(folder_id, file_name, file_bytes, existing_file_id=file_id)
-```
-
-MIME：`.xlsm` → `application/vnd.ms-excel.sheet.macroEnabled.12`；其餘 xlsx 用 openxml。時間顯示加 8 小時（`format_gdrive_time`）。
+| 常數 | 用途與檔名 |
+|------|-----------|
+| `ID_SITEGIANT_BATCH_FOLDER` | `batch_edit_basic_info_all_DD-MM-YYYY-*.xlsx` |
+| `ID_SHOPEE_MASS_UPDATE_FOLDER` | `mass_update_sales_info_3062950_YYYYMMDD*.xlsx` |
 
 ## 讀寫引擎
 
-- **只讀查詢**：有 calamine 可用 `engine="calamine"`
-- **要寫回 xlsm**：`openpyxl.load_workbook(..., keep_vba=True)`，寫完再 `upload_or_update_gdrive_file`
-- 更新工作表：清空列 → `append` 欄名與列；有「條碼」欄則寫入前清洗，儲存格 `number_format = '@'`
+- 只讀可用 calamine；寫回 xlsm：`keep_vba=True`
+- 條碼欄寫入前 `clean_barcode`，儲存格 `@`
 
-## 工作表名稱（必須對得上）
+## 工作表與對鍵
 
 | 檔案 | 工作表 |
 |------|--------|
@@ -36,4 +30,7 @@ MIME：`.xlsm` → `application/vnd.ms-excel.sheet.macroEnabled.12`；其餘 xls
 | 蝦皮賣場商品列表.xlsm | `蝦皮商品列表`、`匯入檔案` |
 | 商品蝦皮麗嬰價格統整表.xlsx | `商品蝦皮麗嬰價格統整表` |
 
-匯入去重用檔案 `md5`。三表對鍵：內部 `自定義編碼`↔蝦皮 `iSKU`；內部 `c`↔麗嬰 `條碼`。
+- 內部 `自定義編碼` ↔ 蝦皮 `iSKU`；內部 `c` ↔ 麗嬰 `條碼`
+- `c` ↔ batch_edit `國際條碼（UPC）` → 統整表 `sitegiant庫存SKU` = `庫存貨品名稱`
+- 入庫單「庫存貨品名稱」抓 `sitegiant庫存SKU`，不要用蝦皮商品名稱
+- 蝦皮校正來源為最新 mass_update；匯入去重用 md5

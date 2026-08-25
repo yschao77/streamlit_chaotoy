@@ -142,13 +142,9 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
                                     if not match.empty:
                                         match_row = match.iloc[0]
                                         
-                                        shopee_name = match_row.get('蝦皮商品名稱', None)
-                                        internal_name = match_row.get('內部商品名稱', match_row.get('名稱', None)) 
-                                        
-                                        if pd.notna(shopee_name) and str(shopee_name).strip() not in ["", "nan", "None"]:
-                                            prod_name = str(shopee_name).strip()
-                                        elif pd.notna(internal_name) and str(internal_name).strip() not in ["", "nan", "None"]:
-                                            prod_name = str(internal_name).strip()
+                                        sg_name = match_row.get('sitegiant庫存SKU', None)
+                                        if pd.notna(sg_name) and str(sg_name).strip() not in ["", "nan", "None"]:
+                                            prod_name = str(sg_name).strip()
                                         
                                         sku = match_row.get('自定義編碼', '')
                                         if pd.notna(sku) and str(sku).strip() != "":
