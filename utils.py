@@ -87,6 +87,26 @@ ID_SHOPEE_UNPUBLISHED_FOLDER = "1pVqpUUHl9RlKL-1wlje4VMP2DkEUStXk"
 ID_DOWNLOAD_ROOT = "1U0tRNz1j62ouKwtT9s-OlrtmBQGlQ5bU"
 ID_PRICE_SUMMARY_FALLBACK = "1d2a6D6-9LV6oBhlwXjb_9xm5TYN80sPd"
 UPC_FILLED_FILENAME = "batch_edit_upc_added_only.xlsx"
+# #region agent log
+try:
+    import json as _dbg_json, time as _dbg_time
+    _dbg_payload = {
+        "sessionId": "8c4f58",
+        "timestamp": int(_dbg_time.time() * 1000),
+        "location": "utils.py:after-ids",
+        "message": "folder ID constants bound",
+        "data": {
+            "has_ID_PROD_FOLDER": "ID_PROD_FOLDER" in globals(),
+            "id_names": [k for k in list(globals().keys()) if k.startswith("ID_")],
+        },
+        "runId": "pre-fix",
+        "hypothesisId": "B",
+    }
+    with open("debug-8c4f58.log", "a", encoding="utf-8") as _dbg_f:
+        _dbg_f.write(_dbg_json.dumps(_dbg_payload, ensure_ascii=False) + "\n")
+except Exception:
+    pass
+# #endregion
 
 TRACKED_SOURCES = (
     {
@@ -965,12 +985,12 @@ def format_status_markdown(rows):
     lines = [
         f"雲端試算表狀態（台北 {taipei_now().strftime('%Y-%m-%d %H:%M:%S')}）",
         "",
-        "| 資料夾 | 用途 | 格式 | 最新檔名 | 最後修改（台北） |",
+        "| 資料夾 | 用途 | 最後修改（台北） |格式 | 最新檔名 | ",
         "|---|---|---|---|---|",
     ]
     for r in rows:
         lines.append(
-            f"| {r['資料夾']} | {r['用途']} | `{r['格式']}` | `{r['最新檔名']}` | {r['最後修改（台北）']} |"
+            f"| {r['資料夾']} | {r['用途']} | {r['最後修改（台北）']} | `{r['格式']}` | `{r['最新檔名']}` |"
         )
     return "\n".join(lines)
 
@@ -1110,3 +1130,23 @@ def run_sitegiant_upc_sync():
         "output": UPC_FILLED_FILENAME,
         "df": filled,
     }
+# #region agent log
+try:
+    import json as _dbg_json2, time as _dbg_time2
+    _dbg_payload2 = {
+        "sessionId": "8c4f58",
+        "timestamp": int(_dbg_time2.time() * 1000),
+        "location": "utils.py:module-end",
+        "message": "utils.py finished loading",
+        "data": {
+            "has_ID_PROD_FOLDER": "ID_PROD_FOLDER" in globals(),
+            "file": __file__,
+        },
+        "runId": "pre-fix",
+        "hypothesisId": "C",
+    }
+    with open("debug-8c4f58.log", "a", encoding="utf-8") as _dbg_f2:
+        _dbg_f2.write(_dbg_json2.dumps(_dbg_payload2, ensure_ascii=False) + "\n")
+except Exception:
+    pass
+# #endregion

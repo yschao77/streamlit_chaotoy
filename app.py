@@ -7,15 +7,78 @@ import json
 import os
 
 # 🌟 從我們剛建立的 utils 中匯入所有工具函式
-from utils import (
-    apply_openpyxl_patch, HAS_CALAMINE, get_cached_gdrive_id, 
-    list_gdrive_files, download_gdrive_file_to_bytes, 
-    get_cached_gdrive_file_bytes, upload_or_update_gdrive_file, 
-    format_gdrive_time, calculate_md5, clean_barcode, process_smart_headers,
-    ID_PROD_FOLDER, ID_PRICE_SUMMARY_FOLDER, ID_SHOPEE_FOLDER,
-    ID_HISTORY_INWARD_FOLDER, ID_BASE_FOLDER, ID_SITEGIANT_BATCH_FOLDER,
-    ID_SITEGIANT_UPC_FOLDER, ID_SHOPEE_MASS_UPDATE_FOLDER, ID_PRICE_SUMMARY_FALLBACK,
+# #region agent log
+def _agent_dbg(location, message, data, hypothesisId):
+    payload = {
+        "sessionId": "8c4f58",
+        "timestamp": int(time.time() * 1000),
+        "location": location,
+        "message": message,
+        "data": data,
+        "runId": "pre-fix",
+        "hypothesisId": hypothesisId,
+    }
+    line = json.dumps(payload, ensure_ascii=False)
+    try:
+        with open("debug-8c4f58.log", "a", encoding="utf-8") as _df:
+            _df.write(line + "\n")
+    except Exception:
+        pass
+    try:
+        req = urllib.request.Request(
+            "http://127.0.0.1:7636/ingest/ec64ea9a-fec9-4b34-9827-0ff4068fc291",
+            data=line.encode("utf-8"),
+            headers={"Content-Type": "application/json", "X-Debug-Session-Id": "8c4f58"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=1)
+    except Exception:
+        pass
+
+import time
+import urllib.request
+_agent_dbg("app.py:before-utils", "about to import utils module", {"cwd": os.getcwd()}, "A")
+import utils as _utils_mod
+_src_path = getattr(_utils_mod, "__file__", None)
+_src_text = ""
+if _src_path and os.path.isfile(_src_path):
+    with open(_src_path, encoding="utf-8", errors="replace") as _sf:
+        _src_text = _sf.read()
+_agent_dbg(
+    "app.py:utils-module",
+    "utils module loaded; inspect ID_PROD_FOLDER",
+    {
+        "file": _src_path,
+        "has_attr": hasattr(_utils_mod, "ID_PROD_FOLDER"),
+        "id_names": [n for n in dir(_utils_mod) if n.startswith("ID_")],
+        "src_has_name": "ID_PROD_FOLDER =" in _src_text,
+        "src_len": len(_src_text),
+        "src_lines": _src_text.count("\n") + 1 if _src_text else 0,
+        "src_snip": "\n".join(_src_text.splitlines()[70:95])[:600],
+    },
+    "A",
 )
+# #endregion
+try:
+    from utils import (
+        apply_openpyxl_patch, HAS_CALAMINE, get_cached_gdrive_id, 
+        list_gdrive_files, download_gdrive_file_to_bytes, 
+        get_cached_gdrive_file_bytes, upload_or_update_gdrive_file, 
+        format_gdrive_time, calculate_md5, clean_barcode, process_smart_headers,
+        ID_PROD_FOLDER, ID_PRICE_SUMMARY_FOLDER, ID_SHOPEE_FOLDER,
+        ID_HISTORY_INWARD_FOLDER, ID_BASE_FOLDER, ID_SITEGIANT_BATCH_FOLDER,
+        ID_SITEGIANT_UPC_FOLDER, ID_SHOPEE_MASS_UPDATE_FOLDER, ID_PRICE_SUMMARY_FALLBACK,
+    )
+    _agent_dbg("app.py:named-import", "from utils import ID_* succeeded", {"ok": True}, "D")
+except ImportError as _imp_err:
+    _agent_dbg(
+        "app.py:named-import",
+        "from utils import ID_* failed",
+        {"ok": False, "err": str(_imp_err), "err_type": type(_imp_err).__name__},
+        "D",
+    )
+    raise
+# #endregion
 
 from views import sitegiant_page, integration_page, status_page
 
