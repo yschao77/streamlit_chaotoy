@@ -117,7 +117,8 @@ def _pem_debug_meta(pk):
     if not isinstance(pk, str):
         return {"present": True, "py_type": type(pk).__name__}
     lines = pk.splitlines()
-    first = lines[0].strip() if lines else ""
+    first_raw = lines[0] if lines else ""
+    first = first_raw.strip().lstrip("\ufeff")
     last = lines[-1].strip() if lines else ""
     return {
         "present": True,
@@ -127,6 +128,11 @@ def _pem_debug_meta(pk):
         "has_lf": "\n" in pk,
         "has_cr": "\r" in pk,
         "literal_backslash_n": "\\n" in pk,
+        "has_bom": pk.startswith("\ufeff") or first_raw.startswith("\ufeff"),
+        "begin_anywhere": "-----BEGIN " in pk,
+        "first_line_has_begin": "BEGIN" in first_raw,
+        "first_line_len": len(first_raw),
+        "first_ords": [ord(c) for c in first_raw[:8]],
         "startswith_begin": first.startswith("-----BEGIN "),
         "first_is_pem_header": bool(re.match(r"^-----BEGIN [A-Z0-9 ]+-----$", first)),
         "has_end_marker": any(ln.strip().startswith("-----END ") for ln in lines),
@@ -141,17 +147,34 @@ def _pem_debug_meta(pk):
 def _fix_private_key_pem(pk):
     if not isinstance(pk, str) or not pk.strip():
         return pk
-    pk = pk.strip()
+    # #region agent log
+    _agent_dbg("H6-H8", "utils.py:_fix_private_key_pem", "pem before header repair", _pem_debug_meta(pk), run_id="pem-header-fix")
+    # #endregion
+    pk = pk.replace("\ufeff", "").strip()
     if (pk.startswith('"') and pk.endswith('"')) or (pk.startswith("'") and pk.endswith("'")):
-        pk = pk[1:-1]
+        pk = pk[1:-1].strip()
     pk = pk.replace("\r\n", "\n").replace("\r", "\n")
     if "\\n" in pk:
         pk = pk.replace("\\n", "\n")
+    begin_idx = pk.find("-----BEGIN ")
+    if begin_idx > 0:
+        pk = pk[begin_idx:]
+    elif begin_idx < 0:
+        end_idx = pk.find("-----END ")
+        if end_idx >= 0:
+            body = pk[:end_idx].strip()
+            footer = pk[end_idx:].lstrip()
+            pk = "-----BEGIN PRIVATE KEY-----\n" + body + "\n" + footer
+        else:
+            pk = "-----BEGIN PRIVATE KEY-----\n" + pk.strip() + "\n-----END PRIVATE KEY-----\n"
     if "-----BEGIN " in pk and "\n" not in pk:
         pk = re.sub(r"(-----BEGIN [A-Z0-9 ]+-----)", r"\1\n", pk)
         pk = re.sub(r"(-----END [A-Z0-9 ]+-----)", r"\n\1", pk)
     if not pk.endswith("\n"):
         pk += "\n"
+    # #region agent log
+    _agent_dbg("H6-H8", "utils.py:_fix_private_key_pem", "pem after header repair", _pem_debug_meta(pk), run_id="pem-header-fix")
+    # #endregion
     return pk
 
 
