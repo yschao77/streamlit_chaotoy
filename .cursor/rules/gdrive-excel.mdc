@@ -10,6 +10,7 @@ alwaysApply: false
 
 - Service：`st.secrets["textkey"]`，CLI / GitHub Actions 用 `GOOGLE_SERVICE_ACCOUNT_JSON`
 - 資料夾常數在 `app.py`。**禁止 API 新建檔**；沒有 `existing_file_id` 就停止。
+- 新資料夾必須把 service account（`textkey` 的 `client_email`）加為檢視者，否則 `files.list` 會是空的。
 - 選最新檔用 `pick_latest_gdrive_file`（解析檔名日期，不要只靠檔名排序）
 
 | 常數 | 用途與檔名 |
