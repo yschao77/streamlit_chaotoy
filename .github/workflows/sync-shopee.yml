@@ -1,4 +1,4 @@
-name: Sync Shopee iSKU
+name: Sync Drive sources
 
 on:
   schedule:
@@ -16,6 +16,28 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Correct latest mass_update into Shopee master
+        continue-on-error: true
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
         run: python scripts/sync_shopee_from_gdrive.py
+      - name: Rebuild price summary from three tables
+        continue-on-error: true
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: python scripts/sync_price_summary.py
+      - name: Fill latest Sitegiant UPC file
+        continue-on-error: true
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: python scripts/sync_sitegiant_upc.py
+      - name: Report spreadsheet modified times
+        if: always()
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          STATUS_MAIL_TO: ${{ secrets.STATUS_MAIL_TO }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+        run: python scripts/report_gdrive_status.py

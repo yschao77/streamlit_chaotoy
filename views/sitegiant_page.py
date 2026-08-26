@@ -19,6 +19,14 @@ from utils import (
     load_shopee_data,
     load_barcode_to_sitegiant_name_map,
     apply_sitegiant_name_from_summary,
+    pick_latest_gdrive_file,
+    download_source_spreadsheet,
+    read_tabular_file,
+    fill_sitegiant_upc,
+    format_gdrive_time,
+    extract_xlsx_from_zip,
+    resolve_named_file,
+    UPC_FILLED_FILENAME,
 )
 
 def _inward_excel_bytes(df, sheet_name="SiteGiant入庫單"):
@@ -100,7 +108,7 @@ def _fix_inward_df_from_summary(df, name_map, empty_sku_barcodes):
     return updated_df, summary, _inward_excel_bytes(updated_df)
 
 
-def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTER, ID_PRICE_SUMMARY_FALLBACK=None):
+def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTER, ID_PRICE_SUMMARY_FALLBACK=None, ID_SITEGIANT_UPC_FOLDER=None):
     """
     渲染 Sitegiant 電商整合管理的所有子頁面
     將需要的 Google Drive ID 當作參數傳進來
@@ -606,11 +614,11 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
             st.markdown("""
             ### 📝 前置條件
             1. **確認 iSKU 對應 UPC**。
-            2. **下載 Sitegiant 批量編輯 UPC 檔案**：
-               - 至 Sitegiant 庫存列表 ➔ [批量編輯](https://sitegiant.co/items/batch-edit) UPC ➔ 下載 Excel。
+            2. **將 Sitegiant 批量編輯 UPC 檔放到雲端 `Sitegiant_UPC` 資料夾**（xlsx 或 zip 皆可）：
+               - 檔名格式：`batch_edit_item_upc_assignment_all_DD-MM-YYYY-*.xlsx`
             3. **確認蝦皮賣場列表已校正**。
             ### 🚀 後續操作
-            - 將下方處理完畢並下載的新 Excel 檔案，上傳回 Sitegiant 覆蓋即可。
+            - 將下方處理完畢的 Excel 上傳回 Sitegiant 覆蓋即可。定時同步也會把結果寫成雲端 `batch_edit_upc_added_only.xlsx`。
             """)
 
         df_shopee_hist, df_shopee_list = load_shopee_data(ID_SHOPEE_MASTER)
@@ -619,65 +627,81 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
             st.error("❌ 無法從雲端讀取蝦皮商品列表！請先前往「蝦皮商品清單轉換」執行校正並回寫雲端。")
         else:
             st.info("✅ 系統已自動從雲端載入最新的蝦皮商品列表，準備好進行 UPC 交叉比對！")
-            
-            uploaded_sg_file = st.file_uploader("📥 請上傳 Sitegiant UPC 批量編輯下載檔 (.xlsx/.xls/.csv)", type=["xlsx", "xls", "csv"])
-            
-            if uploaded_sg_file:
-                if st.button("⚡ 執行自動比對並填補 UPC", type="primary", use_container_width=True):
-                    with st.spinner("⏳ 正在自動比對蝦皮資料庫並填入缺失的 UPC..."):
+
+            latest_upc = None
+            if ID_SITEGIANT_UPC_FOLDER:
+                latest_upc = pick_latest_gdrive_file(
+                    ID_SITEGIANT_UPC_FOLDER,
+                    "batch_edit_item_upc_assignment_all",
+                    "dmy",
+                    include_zip=True,
+                )
+            if latest_upc:
+                st.success(
+                    f"將處理最新來源檔：`{latest_upc['name']}` ｜ 📅 `{format_gdrive_time(latest_upc.get('modifiedTime'))}`"
+                )
+                st.caption("寫回雲端結果檔時，service account 需要對 Sitegiant_UPC 資料夾有「編輯者」權限。")
+            else:
+                st.error("❌ 資料夾內找不到 `batch_edit_item_upc_assignment_all_DD-MM-YYYY-*.xlsx/.zip`。")
+
+            def _run_upc_fill(file_bytes, source_name, write_drive=False):
+                df_sg = read_tabular_file(file_bytes, source_name)
+                filled, stats = fill_sitegiant_upc(df_sg, df_shopee_list)
+                st.session_state["sg_upc_updated_df"] = filled
+                if stats["updated"] > 0:
+                    st.success(f"🎉 處理完成！共成功自動填補 **{stats['updated']}** 筆缺失的 UPC 資料。")
+                    if write_drive and ID_SITEGIANT_UPC_FOLDER:
+                        existing = resolve_named_file(ID_SITEGIANT_UPC_FOLDER, "batch_edit_upc_added_only")
+                        towrite_sg = io.BytesIO()
+                        with pd.ExcelWriter(towrite_sg, engine="openpyxl") as writer:
+                            filled.to_excel(writer, index=False)
+                        upload_or_update_gdrive_file(
+                            ID_SITEGIANT_UPC_FOLDER,
+                            UPC_FILLED_FILENAME,
+                            towrite_sg.getvalue(),
+                            existing_file_id=existing["id"] if existing else None,
+                            allow_create=True,
+                        )
+                        st.info(f"☁️ 已寫回雲端 `{UPC_FILLED_FILENAME}`，請再上傳至 Sitegiant。")
+                else:
+                    st.warning("⚠️ 處理完成，但未找到任何可填補的缺失 UPC 資料。")
+
+            if st.button("⚡ 從雲端最新 UPC 檔填補", type="primary", use_container_width=True):
+                if not latest_upc:
+                    st.error("❌ 沒有可處理的來源檔。")
+                else:
+                    with st.spinner("⏳ 正在下載雲端檔並填入缺失的 UPC..."):
                         try:
-                            if uploaded_sg_file.name.lower().endswith('.csv'):
-                                df_sg = pd.read_csv(uploaded_sg_file, dtype=str)
-                            else:
-                                df_sg = pd.read_excel(uploaded_sg_file, dtype=str)
-                            
-                            df_sg.columns = df_sg.columns.astype(str).str.strip().str.replace('\n', '')
-                            
-                            sg_sku_col = next((c for c in ["Item SKU", "商品 SKU", "SKU", "Item Sku", "item sku", "庫存SKU"] if c in df_sg.columns), None)
-                            sg_upc_col = next((c for c in ["UPC", "國際條碼（UPC）", "國際條碼", "upc"] if c in df_sg.columns), None)
-                            sg_main_col = next((c for c in ["Is Main UPC", "主要"] if c in df_sg.columns), None)
-                            
-                            if not sg_sku_col or not sg_upc_col:
-                                st.error("❌ 檔案解析失敗：找不到對應的 SKU 或 UPC 欄位。")
-                            else:
-                                df_shopee_list['iSKU'] = df_shopee_list['iSKU'].astype(str).str.strip()
-                                df_shopee_list['GTIN_str'] = df_shopee_list['GTIN'].astype(str).str.strip().str.split('.').str[0]
-                                valid_shopee = df_shopee_list[~df_shopee_list['GTIN_str'].isin(["", "00", "0", "nan", "#N/A", "None", "空白"])]
-                                
-                                upc_map_exact = dict(zip(valid_shopee['iSKU'], valid_shopee['GTIN_str']))
-                                                        
-                                updated_indices = []
-                                
-                                for idx, row in df_sg.iterrows():
-                                    sku = str(row[sg_sku_col]).strip()
-                                    current_upc = clean_barcode(row.get(sg_upc_col, ""))
-                                    
-                                    if current_upc in ["", "nan", "None", "0", "00"]:
-                                        if sku in upc_map_exact:
-                                            match_gtin = upc_map_exact[sku]
-                                            df_sg.at[idx, sg_upc_col] = match_gtin
-                                            if sg_main_col:
-                                                df_sg.at[idx, sg_main_col] = "是" if "主要" in sg_main_col else "Yes"
-                                            updated_indices.append(idx)
-                                
-                                df_sg_filtered = df_sg.loc[updated_indices].reset_index(drop=True)
-                                st.session_state['sg_upc_updated_df'] = df_sg_filtered
-                                
-                                if len(df_sg_filtered) > 0:
-                                    st.success(f"🎉 處理完成！共成功自動填補 **{len(df_sg_filtered)}** 筆缺失的 UPC 資料。")
-                                else:
-                                    st.warning("⚠️ 處理完成，但未找到任何可填補的缺失 UPC 資料。")
-                                
+                            payload, inner_name = download_source_spreadsheet(
+                                latest_upc, "batch_edit_item_upc_assignment_all"
+                            )
+                            _run_upc_fill(payload, inner_name, write_drive=True)
                         except Exception as e:
                             st.error(f"❌ 處理檔案時發生錯誤：{str(e)}")
 
-            if 'sg_upc_updated_df' in st.session_state and not st.session_state['sg_upc_updated_df'].empty:
-                df_result = st.session_state['sg_upc_updated_df']
+            with st.expander("備用：手動上傳 UPC 檔"):
+                uploaded_sg_file = st.file_uploader(
+                    "📥 請上傳 Sitegiant UPC 批量編輯下載檔 (.xlsx/.xls/.csv/.zip)",
+                    type=["xlsx", "xls", "csv", "zip"],
+                )
+                if uploaded_sg_file and st.button("⚡ 執行上傳檔自動比對並填補 UPC", type="secondary", use_container_width=True):
+                    with st.spinner("⏳ 正在自動比對蝦皮資料庫並填入缺失的 UPC..."):
+                        try:
+                            raw = uploaded_sg_file.read()
+                            name = uploaded_sg_file.name
+                            if name.lower().endswith(".zip"):
+                                raw, name = extract_xlsx_from_zip(raw, "batch_edit_item_upc_assignment_all")
+                            _run_upc_fill(raw, name, write_drive=False)
+                        except Exception as e:
+                            st.error(f"❌ 處理檔案時發生錯誤：{str(e)}")
+
+            if "sg_upc_updated_df" in st.session_state and not st.session_state["sg_upc_updated_df"].empty:
+                df_result = st.session_state["sg_upc_updated_df"]
                 st.markdown(f"### 📋 成功新增 UPC 預覽（共 {len(df_result)} 筆）")
                 st.dataframe(df_result, use_container_width=True)
                 
                 towrite_sg = io.BytesIO()
-                with pd.ExcelWriter(towrite_sg, engine='openpyxl') as writer:
+                with pd.ExcelWriter(towrite_sg, engine="openpyxl") as writer:
                     df_result.to_excel(writer, index=False)
                     
                 download_filename = f"batch_edit_upc_added_only_{datetime.date.today().strftime('%Y%m%d')}.xlsx"

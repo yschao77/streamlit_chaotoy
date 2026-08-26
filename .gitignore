@@ -18,6 +18,8 @@ env/
 
 # Local spreadsheet dumps (do not commit production/export Excel)
 batch_edit_basic_info_all_*.xlsx
+batch_edit_item_upc_assignment_all_*
+batch_edit_upc_added_only*.xlsx
 mass_update_sales_info_*.xlsx
 
 # OS / editor

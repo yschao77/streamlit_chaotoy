@@ -9,13 +9,14 @@ alwaysApply: false
 ## 連線與檔案 ID
 
 - Service：`st.secrets["textkey"]`，CLI / GitHub Actions 用 `GOOGLE_SERVICE_ACCOUNT_JSON`
-- 資料夾常數在 `app.py`。**禁止 API 新建檔**；沒有 `existing_file_id` 就停止。
+- 資料夾常數與來源目錄在 `utils.py` 的 `TRACKED_SOURCES`。**禁止 API 新建檔**（例外：Sitegiant_UPC 的 `batch_edit_upc_added_only.xlsx` 可用 `allow_create=True`）；沒有 `existing_file_id` 就停止。
 - 新資料夾必須把 service account（`textkey` 的 `client_email`）加為檢視者，否則 `files.list` 會是空的。
-- 選最新檔用 `pick_latest_gdrive_file`（解析檔名日期，不要只靠檔名排序）
+- 選最新檔用 `pick_latest_gdrive_file`（解析檔名日期，不要只靠檔名排序）。Sitegiant 來源可含 zip，用 `download_source_spreadsheet` 解出 xlsx。
 
 | 常數 | 用途與檔名 |
 |------|-----------|
-| `ID_SITEGIANT_BATCH_FOLDER` | `batch_edit_basic_info_all_DD-MM-YYYY-*.xlsx` |
+| `ID_SITEGIANT_UPC_FOLDER` | `batch_edit_item_upc_assignment_all_DD-MM-YYYY-*.xlsx`（或同名 zip） |
+| `ID_SITEGIANT_BATCH_FOLDER` | `batch_edit_basic_info_all_DD-MM-YYYY-*.xlsx`（或同名 zip） |
 | `ID_SHOPEE_MASS_UPDATE_FOLDER` | `mass_update_sales_info_3062950_YYYYMMDD*.xlsx` |
 
 ## 讀寫引擎

@@ -11,10 +11,13 @@ from utils import (
     apply_openpyxl_patch, HAS_CALAMINE, get_cached_gdrive_id, 
     list_gdrive_files, download_gdrive_file_to_bytes, 
     get_cached_gdrive_file_bytes, upload_or_update_gdrive_file, 
-    format_gdrive_time, calculate_md5, clean_barcode, process_smart_headers
+    format_gdrive_time, calculate_md5, clean_barcode, process_smart_headers,
+    ID_PROD_FOLDER, ID_PRICE_SUMMARY_FOLDER, ID_SHOPEE_FOLDER,
+    ID_HISTORY_INWARD_FOLDER, ID_BASE_FOLDER, ID_SITEGIANT_BATCH_FOLDER,
+    ID_SITEGIANT_UPC_FOLDER, ID_SHOPEE_MASS_UPDATE_FOLDER, ID_PRICE_SUMMARY_FALLBACK,
 )
 
-from views import sitegiant_page, integration_page
+from views import sitegiant_page, integration_page, status_page
 
 # 執行修補程式
 apply_openpyxl_patch()
@@ -23,16 +26,8 @@ apply_openpyxl_patch()
 st.set_page_config(page_title="麗嬰與蝦皮商務數據情報中心", page_icon="📊", layout="wide")
 
 # =========================================================================
-# 🌐 雲端資料夾 ID 定義 (這些是常數，留在主檔沒問題)
-# =========================================================================
-ID_PROD_FOLDER = "1NtMAYb-SvdH6XMmqB5G07ttB-NuWCqDV"          
-ID_PRICE_SUMMARY_FOLDER = "1ZM4MscX0UO6rUHjKv-mN5fKDwxg53maZ" 
-ID_SHOPEE_FOLDER = "17eiGnXyU4KwNS6IR5bubBPti46SKXMH0"        
-ID_HISTORY_INWARD_FOLDER = "1ZQ7x4BdRc6BJlURxQ61JqDKrKF7h_vSH"
-ID_BASE_FOLDER = "1HjMt8z8DXlqGhSqe50_hDR3f4LpVLK_w"
-ID_SITEGIANT_BATCH_FOLDER = "197YZx8IGbXvmR4B8SuMs6iShVDdj79PR"
-ID_SHOPEE_MASS_UPDATE_FOLDER = "1OG2kpiLmhBjMR-12vDPUkEdGbUKs4vLs"
-ID_PRICE_SUMMARY_FALLBACK = "1d2a6D6-9LV6oBhlwXjb_9xm5TYN80sPd" 
+# 🌐 雲端資料夾 ID 由 utils.TRACKED_SOURCES 統一維護
+# ========================================================================= 
 
 # 取得主表 ID 狀態
 ID_MASTER_FILE, TIME_MASTER, NAME_MASTER = get_cached_gdrive_id(ID_BASE_FOLDER, "麗嬰採購產品總表")
@@ -251,7 +246,7 @@ st.sidebar.write("---")
 
 main_module = st.sidebar.selectbox(
     "🎯 請選擇核心管理模組：",
-    ["🏪 Sitegiant 電商整合管理", "📦 商品蝦皮麗嬰統整管理"]
+    ["📡 雲端資料狀態", "🏪 Sitegiant 電商整合管理", "📦 商品蝦皮麗嬰統整管理"]
 )
 st.sidebar.write("") 
 
@@ -280,6 +275,7 @@ gdrive_cfg = {
     "NAME_SUMMARY": NAME_SUMMARY,
 
     "ID_SITEGIANT_BATCH_FOLDER": ID_SITEGIANT_BATCH_FOLDER,
+    "ID_SITEGIANT_UPC_FOLDER": ID_SITEGIANT_UPC_FOLDER,
     "ID_SHOPEE_MASS_UPDATE_FOLDER": ID_SHOPEE_MASS_UPDATE_FOLDER,
 }
 
@@ -287,7 +283,16 @@ gdrive_cfg = {
 # 🧭 5. 側邊欄：導覽控制台
 # ==========================================
 # (這裡保留你剛才修好的側邊欄與頁面路由)
-if "商品蝦皮麗嬰統整管理" in main_module:
+if "雲端資料狀態" in main_module:
+    st.sidebar.markdown("### 📡 雲端資料監看")
+    sub_page = st.sidebar.radio(
+        "請選擇執行項目：",
+        ["📋 各表最新修改時間"],
+        index=0
+    )
+    status_page.render(sub_page, gdrive_cfg)
+
+elif "商品蝦皮麗嬰統整管理" in main_module:
     st.sidebar.markdown("### 🛠️ 整合合併轉換功能")
     sub_page = st.sidebar.radio(
         "請選擇執行項目：",
@@ -310,4 +315,5 @@ else:
         ID_HISTORY_INWARD_FOLDER=ID_HISTORY_INWARD_FOLDER, 
         ID_SHOPEE_MASTER=ID_SHOPEE_MASTER,
         ID_PRICE_SUMMARY_FALLBACK=ID_PRICE_SUMMARY_FALLBACK,
+        ID_SITEGIANT_UPC_FOLDER=ID_SITEGIANT_UPC_FOLDER,
     )

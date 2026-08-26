@@ -1,0 +1,17 @@
+- 下載資料: 1U0tRNz1j62ouKwtT9s-OlrtmBQGlQ5bU
+- Sitegiant_UPC: 1-SDUlCjAiDsuPOqJudgvt3cil1UgQb3U
+  - download: batch_edit_item_upc_assignment_all__DD-MM-YYYY-*.zip
+  - file format: batch_edit_item_upc_assignment_all_DD-MM-YYYY-*.xlsx
+- Sitegiant_BasicInfo: 197YZx8IGbXvmR4B8SuMs6iShVDdj79PR
+  - download: batch_edit_basic_info_all_DD-MM-YYYY-*.zip
+  - file format: batch_edit_basic_info_all_DD-MM-YYYY-*.xlsx
+- 蝦皮_價格及庫存: 1OG2kpiLmhBjMR-12vDPUkEdGbUKs4vLs
+  - file format: mass_update_sales_info_3062950_YYYYMMDD*.xlsx
+- 蝦皮_媒體資訊: 1czuQ9nuP4YSV1VNUqyKyEnQILZ98e0yS
+  - file format: mass_update_media_info_3062950_YYYYMMDD*.xlsx
+- 蝦皮_商品標題及描述: 1vfIj902iavnijDS1ppieGbVKTUaW-r-T
+  - file format: mass_update_basic_info_3062950_YYYYMMDD*.xlsx
+- 蝦皮_配送選項: 1RKIEv0x3G1BCCS6FKEyW1smKCg6SHsXI
+  - file format: mass_update_shipping_info_3062950_YYYYMMDD*.xlsx
+- 蝦皮_未上架: 1pVqpUUHl9RlKL-1wlje4VMP2DkEUStXk
+  - file format: mass_republish_items_3062950_20260816231210.xlsx

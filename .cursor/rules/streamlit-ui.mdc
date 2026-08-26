@@ -21,12 +21,13 @@ def render(sub_page, cfg):
         ...
 ```
 
-## 兩個模組（標籤字串必須對得上 `if sub_page ==`）
+## 三個模組（標籤字串必須對得上 `if sub_page ==`）
 
-1. Sitegiant：採購入庫轉換、歷史入庫、批量 UPC、採購單待處理
-2. 統整管理：三表整合、麗嬰合併審核、蝦皮清單轉換、歷史/查詢
+1. 雲端資料狀態：各表最新修改時間
+2. Sitegiant：採購入庫轉換、歷史入庫、批量 UPC、採購單待處理
+3. 統整管理：三表整合、麗嬰合併審核、蝦皮清單轉換、歷史/查詢
 
-新子頁：先加 `radio` 選項，再在對應 `views/*.py` 加分支。`integration_page.render(sub_page, gdrive_cfg)`；`sitegiant_page` 傳個別 Drive ID。
+新子頁：先加 `radio` 選項，再在對應 `views/*.py` 加分支。`integration_page.render(sub_page, gdrive_cfg)`；`status_page.render(sub_page, gdrive_cfg)`；`sitegiant_page` 傳個別 Drive ID。
 
 ## 畫面慣例
 

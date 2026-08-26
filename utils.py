@@ -7,6 +7,7 @@ import io
 import os
 import re
 import json
+import zipfile
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
@@ -60,8 +61,145 @@ XLSX_MIME_QUERY = (
     "(mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' "
     "or mimeType = 'application/vnd.ms-excel.sheet.macroEnabled.12')"
 )
+ZIP_MIME_QUERY = (
+    "(mimeType = 'application/zip' or mimeType = 'application/x-zip-compressed' "
+    "or name contains '.zip')"
+)
+DMY_DATE_RE = re.compile(r"(\d{2})-(\d{2})-(\d{4})")
+YMD_DATE_RE = re.compile(r"(?<!\d)(\d{8})(?!\d)")
+YMDHMS_DATE_RE = re.compile(r"(?<!\d)(\d{14})(?!\d)")
 BATCH_EDIT_DATE_RE = re.compile(r"batch_edit_basic_info_all_(\d{2})-(\d{2})-(\d{4})", re.I)
 MASS_UPDATE_DATE_RE = re.compile(r"mass_update_sales_info_3062950_(\d{8})", re.I)
+
+# Drive 資料夾 ID（路徑，不是憑證）
+ID_PROD_FOLDER = "1NtMAYb-SvdH6XMmqB5G07ttB-NuWCqDV"
+ID_PRICE_SUMMARY_FOLDER = "1ZM4MscX0UO6rUHjKv-mN5fKDwxg53maZ"
+ID_SHOPEE_FOLDER = "17eiGnXyU4KwNS6IR5bubBPti46SKXMH0"
+ID_HISTORY_INWARD_FOLDER = "1ZQ7x4BdRc6BJlURxQ61JqDKrKF7h_vSH"
+ID_BASE_FOLDER = "1HjMt8z8DXlqGhSqe50_hDR3f4LpVLK_w"
+ID_SITEGIANT_BATCH_FOLDER = "197YZx8IGbXvmR4B8SuMs6iShVDdj79PR"
+ID_SITEGIANT_UPC_FOLDER = "1-SDUlCjAiDsuPOqJudgvt3cil1UgQb3U"
+ID_SHOPEE_MASS_UPDATE_FOLDER = "1OG2kpiLmhBjMR-12vDPUkEdGbUKs4vLs"
+ID_SHOPEE_MEDIA_FOLDER = "1czuQ9nuP4YSV1VNUqyKyEnQILZ98e0yS"
+ID_SHOPEE_BASIC_INFO_FOLDER = "1vfIj902iavnijDS1ppieGbVKTUaW-r-T"
+ID_SHOPEE_SHIPPING_FOLDER = "1RKIEv0x3G1BCCS6FKEyW1smKCg6SHsXI"
+ID_SHOPEE_UNPUBLISHED_FOLDER = "1pVqpUUHl9RlKL-1wlje4VMP2DkEUStXk"
+ID_DOWNLOAD_ROOT = "1U0tRNz1j62ouKwtT9s-OlrtmBQGlQ5bU"
+ID_PRICE_SUMMARY_FALLBACK = "1d2a6D6-9LV6oBhlwXjb_9xm5TYN80sPd"
+UPC_FILLED_FILENAME = "batch_edit_upc_added_only.xlsx"
+
+TRACKED_SOURCES = (
+    {
+        "key": "liying_master",
+        "folder": "麗嬰採購產品總表",
+        "folder_id": ID_BASE_FOLDER,
+        "name_contains": "麗嬰採購產品總表",
+        "kind": "keyword",
+        "pattern": "麗嬰採購產品總表.xlsm",
+        "include_zip": False,
+        "consumed": True,
+    },
+    {
+        "key": "local_prod",
+        "folder": "商品列表",
+        "folder_id": ID_PROD_FOLDER,
+        "name_contains": "商品列表",
+        "kind": "keyword",
+        "pattern": "商品列表.xlsx",
+        "include_zip": False,
+        "consumed": True,
+    },
+    {
+        "key": "shopee_master",
+        "folder": "蝦皮賣場商品列表",
+        "folder_id": ID_SHOPEE_FOLDER,
+        "name_contains": "蝦皮賣場商品列表",
+        "kind": "keyword",
+        "pattern": "蝦皮賣場商品列表.xlsm",
+        "include_zip": False,
+        "consumed": True,
+    },
+    {
+        "key": "price_summary",
+        "folder": "商品蝦皮麗嬰價格統整表",
+        "folder_id": ID_PRICE_SUMMARY_FOLDER,
+        "name_contains": "商品蝦皮麗嬰價格統整表",
+        "kind": "keyword",
+        "pattern": "商品蝦皮麗嬰價格統整表.xlsx",
+        "include_zip": False,
+        "consumed": True,
+    },
+    {
+        "key": "sitegiant_upc",
+        "folder": "Sitegiant_UPC",
+        "folder_id": ID_SITEGIANT_UPC_FOLDER,
+        "name_contains": "batch_edit_item_upc_assignment_all",
+        "kind": "dmy",
+        "pattern": "batch_edit_item_upc_assignment_all_DD-MM-YYYY-*.xlsx",
+        "include_zip": True,
+        "consumed": True,
+    },
+    {
+        "key": "sitegiant_basic",
+        "folder": "Sitegiant_BasicInfo",
+        "folder_id": ID_SITEGIANT_BATCH_FOLDER,
+        "name_contains": "batch_edit_basic_info_all",
+        "kind": "dmy",
+        "pattern": "batch_edit_basic_info_all_DD-MM-YYYY-*.xlsx",
+        "include_zip": True,
+        "consumed": True,
+    },
+    {
+        "key": "shopee_sales",
+        "folder": "蝦皮_價格及庫存",
+        "folder_id": ID_SHOPEE_MASS_UPDATE_FOLDER,
+        "name_contains": "mass_update_sales_info_3062950",
+        "kind": "ymd",
+        "pattern": "mass_update_sales_info_3062950_YYYYMMDD*.xlsx",
+        "include_zip": False,
+        "consumed": True,
+    },
+    {
+        "key": "shopee_media",
+        "folder": "蝦皮_媒體資訊",
+        "folder_id": ID_SHOPEE_MEDIA_FOLDER,
+        "name_contains": "mass_update_media_info_3062950",
+        "kind": "ymd",
+        "pattern": "mass_update_media_info_3062950_YYYYMMDD*.xlsx",
+        "include_zip": False,
+        "consumed": False,
+    },
+    {
+        "key": "shopee_basic_info",
+        "folder": "蝦皮_商品標題及描述",
+        "folder_id": ID_SHOPEE_BASIC_INFO_FOLDER,
+        "name_contains": "mass_update_basic_info_3062950",
+        "kind": "ymd",
+        "pattern": "mass_update_basic_info_3062950_YYYYMMDD*.xlsx",
+        "include_zip": False,
+        "consumed": False,
+    },
+    {
+        "key": "shopee_shipping",
+        "folder": "蝦皮_配送選項",
+        "folder_id": ID_SHOPEE_SHIPPING_FOLDER,
+        "name_contains": "mass_update_shipping_info_3062950",
+        "kind": "ymd",
+        "pattern": "mass_update_shipping_info_3062950_YYYYMMDD*.xlsx",
+        "include_zip": False,
+        "consumed": False,
+    },
+    {
+        "key": "shopee_unpublished",
+        "folder": "蝦皮_未上架",
+        "folder_id": ID_SHOPEE_UNPUBLISHED_FOLDER,
+        "name_contains": "mass_republish_items_3062950",
+        "kind": "ymd_hms",
+        "pattern": "mass_republish_items_3062950_YYYYMMDDHHMMSS.xlsx",
+        "include_zip": False,
+        "consumed": False,
+    },
+)
 
 
 def _in_streamlit():
@@ -180,8 +318,9 @@ def get_drive_service():
 # =========================================================================
 # 🔍 2. 雲端核心實戰工具與搜尋常式
 # =========================================================================
-def _list_gdrive_files_raw(folder_id, name_contains=None):
-    query = f"'{folder_id}' in parents and {XLSX_MIME_QUERY} and trashed = false"
+def _list_gdrive_files_raw(folder_id, name_contains=None, include_zip=False):
+    mime = f"({XLSX_MIME_QUERY} or {ZIP_MIME_QUERY})" if include_zip else XLSX_MIME_QUERY
+    query = f"'{folder_id}' in parents and {mime} and trashed = false"
     if name_contains:
         query += f" and name contains '{name_contains}'"
     files = []
@@ -211,9 +350,9 @@ def get_cached_gdrive_id(folder_id, file_name_keyword):
         pass
     return None, None, None
 
-def list_gdrive_files(folder_id, name_contains=None):
+def list_gdrive_files(folder_id, name_contains=None, include_zip=False):
     try:
-        files = _list_gdrive_files_raw(folder_id, name_contains=name_contains)
+        files = _list_gdrive_files_raw(folder_id, name_contains=name_contains, include_zip=include_zip)
         files.sort(key=lambda x: x["name"], reverse=True)
         return files
     except Exception as e:
@@ -221,30 +360,122 @@ def list_gdrive_files(folder_id, name_contains=None):
         return []
 
 
+def _normalize_kind(kind):
+    if kind in ("batch_edit", "dmy"):
+        return "dmy"
+    if kind in ("mass_update", "ymd"):
+        return "ymd"
+    return kind
+
+
 def _parse_named_file_date(name, kind):
-    if kind == "batch_edit":
-        m = BATCH_EDIT_DATE_RE.search(name or "")
+    kind = _normalize_kind(kind)
+    text = name or ""
+    if kind == "dmy":
+        m = BATCH_EDIT_DATE_RE.search(text) or DMY_DATE_RE.search(text)
         if m:
-            return datetime.date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
-    elif kind == "mass_update":
-        m = MASS_UPDATE_DATE_RE.search(name or "")
+            groups = m.groups()
+            if len(groups) == 3:
+                return datetime.datetime(int(groups[2]), int(groups[1]), int(groups[0]))
+    elif kind == "ymd":
+        m = MASS_UPDATE_DATE_RE.search(text)
         if m:
-            return datetime.datetime.strptime(m.group(1), "%Y%m%d").date()
+            return datetime.datetime.strptime(m.group(1), "%Y%m%d")
+        m = re.search(r"_(\d{8})", text)
+        if m:
+            return datetime.datetime.strptime(m.group(1), "%Y%m%d")
+    elif kind == "ymd_hms":
+        m = YMDHMS_DATE_RE.search(text)
+        if m:
+            return datetime.datetime.strptime(m.group(1), "%Y%m%d%H%M%S")
+        m = YMD_DATE_RE.search(text)
+        if m:
+            return datetime.datetime.strptime(m.group(1), "%Y%m%d")
     return None
 
 
-def pick_latest_gdrive_file(folder_id, name_contains, kind):
-    """依檔名內日期取最新檔；同日再用 modifiedTime。"""
-    files = list_gdrive_files(folder_id, name_contains=name_contains)
+def _rank_latest_file(files, kind):
+    kind = _normalize_kind(kind)
     ranked = []
     for f in files:
         file_date = _parse_named_file_date(f.get("name"), kind)
         if file_date:
             ranked.append((file_date, f.get("modifiedTime") or "", f))
+        elif kind == "keyword":
+            ranked.append((datetime.datetime.min, f.get("modifiedTime") or "", f))
     if not ranked:
+        if kind == "keyword" and files:
+            files = sorted(files, key=lambda x: x.get("modifiedTime") or "", reverse=True)
+            return files[0]
         return None
     ranked.sort(key=lambda x: (x[0], x[1]), reverse=True)
     return ranked[0][2]
+
+
+def pick_latest_gdrive_file(folder_id, name_contains, kind, include_zip=None):
+    """依檔名內日期取最新檔；同日再用 modifiedTime。"""
+    kind = _normalize_kind(kind)
+    if include_zip is None:
+        include_zip = kind == "dmy"
+    files = list_gdrive_files(folder_id, name_contains=name_contains, include_zip=include_zip)
+    return _rank_latest_file(files, kind)
+
+
+def resolve_named_file(folder_id, keyword):
+    files = list_gdrive_files(folder_id, name_contains=keyword)
+    if not files:
+        return None
+    files.sort(key=lambda x: x.get("modifiedTime") or "", reverse=True)
+    return files[0]
+
+
+def extract_xlsx_from_zip(file_bytes, preferred_contains=None):
+    payload = _file_payload_bytes(file_bytes)
+    with zipfile.ZipFile(io.BytesIO(payload)) as zf:
+        names = [
+            n for n in zf.namelist()
+            if not n.endswith("/") and n.lower().endswith((".xlsx", ".xls", ".csv"))
+        ]
+        if not names:
+            raise ValueError("ZIP 內找不到 Excel/CSV")
+        if preferred_contains:
+            needle = preferred_contains.lower()
+            matched = [n for n in names if needle in os.path.basename(n).lower()]
+            names = matched or names
+        chosen = names[0]
+        return io.BytesIO(zf.read(chosen)), os.path.basename(chosen)
+
+
+def download_source_spreadsheet(file_meta, name_contains=None):
+    """下載最新來源；若是 zip 則解出內層試算表。"""
+    raw = download_gdrive_file_to_bytes(file_meta["id"])
+    name = file_meta.get("name") or ""
+    if name.lower().endswith(".zip"):
+        inner_bytes, inner_name = extract_xlsx_from_zip(raw, preferred_contains=name_contains)
+        return inner_bytes, inner_name
+    return raw, name
+
+
+def read_tabular_file(file_bytes, filename):
+    payload = _file_payload_bytes(file_bytes)
+    name = (filename or "").lower()
+    if name.endswith(".csv"):
+        return pd.read_csv(io.BytesIO(payload), dtype=str)
+    engine_kw = {"engine": "calamine"} if HAS_CALAMINE and name.endswith(".xlsx") else {}
+    return pd.read_excel(io.BytesIO(payload), dtype=str, **engine_kw)
+
+
+def pick_latest_source(source_key):
+    src = next((s for s in TRACKED_SOURCES if s["key"] == source_key), None)
+    if not src:
+        return None, None
+    latest = pick_latest_gdrive_file(
+        src["folder_id"],
+        src["name_contains"],
+        src["kind"],
+        include_zip=src.get("include_zip"),
+    )
+    return src, latest
 
 
 def download_gdrive_file_to_bytes(file_id):
@@ -262,7 +493,7 @@ def get_cached_gdrive_file_bytes(file_id):
     file_stream = download_gdrive_file_to_bytes(file_id)
     return file_stream.getvalue()
 
-def upload_or_update_gdrive_file(folder_id, file_name, file_bytes, existing_file_id=None):
+def upload_or_update_gdrive_file(folder_id, file_name, file_bytes, existing_file_id=None, allow_create=False):
     file_name_str = str(file_name).lower()
     if file_name_str.endswith('.xlsm'):
         mime_type = 'application/vnd.ms-excel.sheet.macroEnabled.12'
@@ -276,6 +507,14 @@ def upload_or_update_gdrive_file(folder_id, file_name, file_bytes, existing_file
     if existing_file_id:
         get_drive_service().files().update(fileId=existing_file_id, media_body=media, supportsAllDrives=True).execute()
         return existing_file_id
+    if allow_create:
+        created = get_drive_service().files().create(
+            body={"name": file_name, "parents": [folder_id]},
+            media_body=media,
+            fields="id",
+            supportsAllDrives=True,
+        ).execute()
+        return created.get("id")
     _stop_or_raise(f"❌ 拒絕建立新檔案【{file_name}】！為避免 Google 空間配額與權限錯誤，請先手動於雲端建立該檔案。")
 
 def format_gdrive_time(time_str):
@@ -494,17 +733,18 @@ def load_sitegiant_batch_name_map(folder_id):
     if not latest:
         return {}, None
     engine_kw = {"engine": "calamine"} if HAS_CALAMINE else {}
-    df = pd.read_excel(download_gdrive_file_to_bytes(latest["id"]), dtype=str, **engine_kw)
+    payload, inner_name = download_source_spreadsheet(latest, "batch_edit_basic_info_all")
+    df = pd.read_excel(payload, dtype=str, **engine_kw)
     df.columns = df.columns.astype(str).str.strip().str.replace("\n", "")
     upc_col = next((c for c in df.columns if "國際條碼" in c or c.upper() == "UPC"), None)
     name_col = "庫存貨品名稱" if "庫存貨品名稱" in df.columns else None
     if not upc_col or not name_col:
-        return {}, latest
+        return {}, {**latest, "inner_name": inner_name}
     df["_upc"] = df[upc_col].map(clean_barcode)
     df["_name"] = df[name_col].astype(str).str.strip()
     df = df[(df["_upc"] != "") & (~df["_name"].isin(["", "nan", "None"]))]
     df = df.drop_duplicates(subset=["_upc"], keep="last")
-    return dict(zip(df["_upc"], df["_name"])), latest
+    return dict(zip(df["_upc"], df["_name"])), {**latest, "inner_name": inner_name}
 
 
 def load_barcode_to_sitegiant_name_map(file_id):
@@ -678,4 +918,195 @@ def apply_shopee_isku_from_source(file_bytes, source_name, shopee_master_id, sho
         "name": source_name,
         "imported_at": imported_at,
         "df": df_clean if saved else None,
+    }
+
+
+def _status_error_text(exc):
+    msg = str(exc)
+    lowered = msg.lower()
+    if any(k in lowered for k in ["憑證", "credential", "private_key", "textkey", "service_account"]):
+        return "憑證缺失／無效"
+    return msg
+
+
+def collect_tracked_file_status():
+    """各監看來源的最新檔名與台北修改時間。"""
+    rows = []
+    for src in TRACKED_SOURCES:
+        row = {
+            "資料夾": src["folder"],
+            "用途": "已接入流程" if src.get("consumed") else "僅監看",
+            "格式": src["pattern"],
+            "最新檔名": "（無）",
+            "最後修改（台北）": "❌ 雲端檔案尚未建立/不存在",
+        }
+        try:
+            files = _list_gdrive_files_raw(
+                src["folder_id"],
+                name_contains=src["name_contains"],
+                include_zip=bool(src.get("include_zip")),
+            )
+            if src["kind"] == "keyword":
+                files.sort(key=lambda x: x.get("modifiedTime") or "", reverse=True)
+                latest = files[0] if files else None
+            else:
+                latest = _rank_latest_file(files, src["kind"])
+            if latest:
+                row["最新檔名"] = latest.get("name") or "（無）"
+                row["最後修改（台北）"] = format_gdrive_time(latest.get("modifiedTime"))
+        except Exception as e:
+            row["最新檔名"] = "讀取失敗"
+            row["最後修改（台北）"] = _status_error_text(e)
+        rows.append(row)
+    return rows
+
+
+def format_status_markdown(rows):
+    lines = [
+        f"雲端試算表狀態（台北 {taipei_now().strftime('%Y-%m-%d %H:%M:%S')}）",
+        "",
+        "| 資料夾 | 用途 | 格式 | 最新檔名 | 最後修改（台北） |",
+        "|---|---|---|---|---|",
+    ]
+    for r in rows:
+        lines.append(
+            f"| {r['資料夾']} | {r['用途']} | `{r['格式']}` | `{r['最新檔名']}` | {r['最後修改（台北）']} |"
+        )
+    return "\n".join(lines)
+
+
+def fill_sitegiant_upc(df_sg, df_shopee_list):
+    """以蝦皮 iSKU→GTIN 填補 Sitegiant UPC 空白列，只回傳有更新的列。"""
+    df_sg = df_sg.copy()
+    df_sg.columns = df_sg.columns.astype(str).str.strip().str.replace("\n", "")
+    sg_sku_col = next(
+        (c for c in ["Item SKU", "商品 SKU", "SKU", "Item Sku", "item sku", "庫存SKU"] if c in df_sg.columns),
+        None,
+    )
+    sg_upc_col = next(
+        (c for c in ["UPC", "國際條碼（UPC）", "國際條碼", "upc"] if c in df_sg.columns),
+        None,
+    )
+    sg_main_col = next((c for c in ["Is Main UPC", "主要"] if c in df_sg.columns), None)
+    if not sg_sku_col or not sg_upc_col:
+        raise ValueError("檔案解析失敗：找不到對應的 SKU 或 UPC 欄位。")
+    if df_shopee_list is None or df_shopee_list.empty:
+        raise ValueError("蝦皮商品列表是空的，無法填補 UPC。")
+
+    work = df_shopee_list.copy()
+    work["iSKU"] = work["iSKU"].astype(str).str.strip()
+    work["GTIN_str"] = work["GTIN"].astype(str).str.strip().str.split(".").str[0]
+    valid = work[~work["GTIN_str"].isin(["", "00", "0", "nan", "#N/A", "None", "空白"])]
+    upc_map = dict(zip(valid["iSKU"], valid["GTIN_str"]))
+
+    updated_indices = []
+    for idx, row in df_sg.iterrows():
+        sku = str(row[sg_sku_col]).strip()
+        current_upc = clean_barcode(row.get(sg_upc_col, ""))
+        if current_upc in ["", "nan", "None", "0", "00"] and sku in upc_map:
+            df_sg.at[idx, sg_upc_col] = upc_map[sku]
+            if sg_main_col:
+                df_sg.at[idx, sg_main_col] = "是" if "主要" in sg_main_col else "Yes"
+            updated_indices.append(idx)
+    filled = df_sg.loc[updated_indices].reset_index(drop=True)
+    return filled, {"updated": len(filled), "source_rows": len(df_sg)}
+
+
+def _excel_bytes(df, sheet_name="Sheet1"):
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name=sheet_name)
+    return buf.getvalue()
+
+
+def run_shopee_isku_sync():
+    latest = pick_latest_gdrive_file(
+        ID_SHOPEE_MASS_UPDATE_FOLDER, "mass_update_sales_info_3062950", "mass_update"
+    )
+    if not latest:
+        return {"ok": False, "reason": "找不到 mass_update_sales_info_3062950_YYYYMMDD*.xlsx"}
+    master = resolve_named_file(ID_SHOPEE_FOLDER, "蝦皮賣場商品列表")
+    if not master:
+        return {"ok": False, "reason": "找不到雲端檔案：蝦皮賣場商品列表.xlsm"}
+    payload, inner_name = download_source_spreadsheet(latest, "mass_update_sales_info_3062950")
+    result = apply_shopee_isku_from_source(
+        payload, inner_name or latest["name"], master["id"], ID_SHOPEE_FOLDER, master["name"]
+    )
+    result["source"] = latest["name"]
+    result["master"] = master["name"]
+    return result
+
+
+def run_price_summary_sync():
+    master = resolve_named_file(ID_BASE_FOLDER, "麗嬰採購產品總表")
+    prod = resolve_named_file(ID_PROD_FOLDER, "商品列表")
+    shopee = resolve_named_file(ID_SHOPEE_FOLDER, "蝦皮賣場商品列表")
+    summary = resolve_named_file(ID_PRICE_SUMMARY_FOLDER, "商品蝦皮麗嬰價格統整表")
+    missing = []
+    if not master:
+        missing.append("麗嬰採購產品總表")
+    if not prod:
+        missing.append("商品列表")
+    if not shopee:
+        missing.append("蝦皮賣場商品列表")
+    if not summary:
+        missing.append("商品蝦皮麗嬰價格統整表")
+    if missing:
+        return {"ok": False, "reason": "找不到：" + "、".join(missing)}
+    df, batch_meta = build_price_summary_df(
+        master["id"], prod["id"], shopee["id"], ID_SITEGIANT_BATCH_FOLDER
+    )
+    payload = _excel_bytes(df, "商品蝦皮麗嬰價格統整表")
+    upload_or_update_gdrive_file(
+        ID_PRICE_SUMMARY_FOLDER,
+        summary["name"] or "商品蝦皮麗嬰價格統整表.xlsx",
+        payload,
+        existing_file_id=summary["id"],
+    )
+    return {
+        "ok": True,
+        "rows": len(df),
+        "batch": (batch_meta or {}).get("name"),
+        "summary": summary["name"],
+    }
+
+
+def run_sitegiant_upc_sync():
+    latest = pick_latest_gdrive_file(
+        ID_SITEGIANT_UPC_FOLDER, "batch_edit_item_upc_assignment_all", "dmy", include_zip=True
+    )
+    if not latest:
+        return {"ok": False, "reason": "找不到 batch_edit_item_upc_assignment_all_DD-MM-YYYY-*.xlsx/.zip"}
+    shopee = resolve_named_file(ID_SHOPEE_FOLDER, "蝦皮賣場商品列表")
+    if not shopee:
+        return {"ok": False, "reason": "找不到雲端檔案：蝦皮賣場商品列表.xlsm"}
+    _, df_list = load_shopee_data(shopee["id"])
+    payload, inner_name = download_source_spreadsheet(latest, "batch_edit_item_upc_assignment_all")
+    df_sg = read_tabular_file(payload, inner_name)
+    filled, stats = fill_sitegiant_upc(df_sg, df_list)
+    if stats["updated"] == 0:
+        return {
+            "ok": True,
+            "reason": "no_updates",
+            "updated": 0,
+            "source": latest["name"],
+            "inner_name": inner_name,
+            "df": filled,
+        }
+    existing = resolve_named_file(ID_SITEGIANT_UPC_FOLDER, "batch_edit_upc_added_only")
+    upload_or_update_gdrive_file(
+        ID_SITEGIANT_UPC_FOLDER,
+        UPC_FILLED_FILENAME,
+        _excel_bytes(filled),
+        existing_file_id=existing["id"] if existing else None,
+        allow_create=True,
+    )
+    return {
+        "ok": True,
+        "updated": stats["updated"],
+        "source_rows": stats["source_rows"],
+        "source": latest["name"],
+        "inner_name": inner_name,
+        "output": UPC_FILLED_FILENAME,
+        "df": filled,
     }
