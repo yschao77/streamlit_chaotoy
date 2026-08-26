@@ -16,10 +16,91 @@ from utils import (
     list_gdrive_files,
     get_cached_gdrive_file_bytes,
     clean_barcode,
-    load_shopee_data
+    load_shopee_data,
+    load_barcode_to_sitegiant_name_map,
+    apply_sitegiant_name_from_summary,
 )
 
-def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTER):
+def _inward_excel_bytes(df, sheet_name="SiteGiant入庫單"):
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name=sheet_name)
+    return buf.getvalue()
+
+
+def _xlsx_filename(name):
+    """openpyxl 產出的是 xlsx 位元組，上傳 MIME 必須跟副檔名一致，避免把 OOXML 標成 .xls。"""
+    raw = str(name).strip()
+    lower = raw.lower()
+    if lower.endswith(".xlsx"):
+        return raw
+    if lower.endswith(".xls"):
+        return raw[:-4] + ".xlsx"
+    if "." in raw:
+        return raw.rsplit(".", 1)[0] + ".xlsx"
+    return f"{raw}.xlsx"
+
+
+def _read_inward_excel(file_bytes):
+    payload = file_bytes.getvalue() if isinstance(file_bytes, io.BytesIO) else file_bytes
+    engine_kw = {"engine": "calamine"} if HAS_CALAMINE else {}
+    return pd.read_excel(io.BytesIO(payload), **engine_kw)
+
+
+def _hist_fix_error_text(exc):
+    msg = str(exc)
+    lowered = msg.lower()
+    if any(k in lowered for k in ["憑證", "credential", "private_key", "textkey", "service_account"]):
+        return "憑證缺失／無效"
+    if "欄位" in msg or "找不到" in msg:
+        return msg
+    return "讀寫失敗"
+
+
+def _show_hist_fix_results(results, key_prefix):
+    if not results:
+        return
+    for i, item in enumerate(results):
+        name = item["name"]
+        if item.get("error"):
+            st.error(f"❌ `{name}`：{item['error']}")
+            continue
+        updated = item.get("updated", 0)
+        not_found = item.get("not_found") or []
+        empty_sku = item.get("empty_sku") or []
+        status = item.get("status")
+        if status == "overwritten":
+            st.success(f"✅ `{name}` 已覆寫雲端（更新 {updated} 筆庫存貨品名稱）")
+        elif status == "download_only":
+            st.warning(
+                f"⚠️ `{name}` 雲端沒有同名檔，未寫入。請先在歷史入庫資料夾手動建立該檔。"
+                f"已更新 {updated} 筆名稱，可先下載。"
+            )
+        else:
+            st.info(f"📄 `{name}`：更新 {updated} 筆庫存貨品名稱")
+        if not_found:
+            with st.expander(f"找不到統整表對應（{len(not_found)} 筆）— {name}"):
+                st.write(not_found)
+        if empty_sku:
+            with st.expander(f"統整表 sitegiant庫存SKU 空白（{len(empty_sku)} 筆）— {name}"):
+                st.write(empty_sku)
+        if item.get("bytes"):
+            dl_name = _xlsx_filename(name)
+            st.download_button(
+                label=f"📥 下載更正後檔案：{dl_name}",
+                data=item["bytes"],
+                file_name=dl_name,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key=f"{key_prefix}_dl_{i}_{name}",
+            )
+
+
+def _fix_inward_df_from_summary(df, name_map, empty_sku_barcodes):
+    updated_df, summary = apply_sitegiant_name_from_summary(df, name_map, empty_sku_barcodes)
+    return updated_df, summary, _inward_excel_bytes(updated_df)
+
+
+def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTER, ID_PRICE_SUMMARY_FALLBACK=None):
     """
     渲染 Sitegiant 電商整合管理的所有子頁面
     將需要的 Google Drive ID 當作參數傳進來
@@ -359,9 +440,130 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
     # 子功能 2：📜 Sitegiant 歷史入庫單紀錄
     # -------------------------------------------------------------------------
     elif sub_page == "📜 Sitegiant 歷史入庫單紀錄":
-        st.subheader("📊 歷史入庫單與成本稅款加總指標檢視")
+        summary_file_id = ID_PRICE_SUMMARY or ID_PRICE_SUMMARY_FALLBACK
         hist_files = list_gdrive_files(ID_HISTORY_INWARD_FOLDER)
-        if not hist_files: st.warning(f"💡 目前雲端無歷史單據。")
+        hist_by_name = {f["name"]: f for f in hist_files}
+
+        st.subheader("📥 批次匯入歷史入庫單")
+        st.caption(
+            "以「國際條碼」對統整表欄位 `c`，將 `sitegiant庫存SKU` 寫入「庫存貨品名稱」。"
+            "雲端已有同檔名才覆寫；沒有同名檔只提供本機下載，不新建。"
+        )
+        uploaded_hist_files = st.file_uploader(
+            "📥 選擇歷史入庫單 Excel（可多選）",
+            type=["xlsx", "xls"],
+            accept_multiple_files=True,
+            key="hist_inward_import_files",
+        )
+        if st.button("✨ 依統整表更新庫存貨品名稱並匯入", type="primary", use_container_width=True, key="hist_inward_import_btn"):
+            if not uploaded_hist_files:
+                st.error("❌ 請先選擇要匯入的入庫單檔案。")
+            else:
+                with st.spinner("⏳ 正在對照統整表並處理匯入檔案..."):
+                    try:
+                        name_map, empty_sku_barcodes = load_barcode_to_sitegiant_name_map(summary_file_id)
+                        results = []
+                        for uploaded in uploaded_hist_files:
+                            file_name = uploaded.name
+                            try:
+                                df_in = _read_inward_excel(uploaded.getvalue())
+                                _, summary, xlsx_bytes = _fix_inward_df_from_summary(
+                                    df_in, name_map, empty_sku_barcodes
+                                )
+                                existing = hist_by_name.get(file_name)
+                                if existing:
+                                    upload_or_update_gdrive_file(
+                                        ID_HISTORY_INWARD_FOLDER,
+                                        _xlsx_filename(file_name),
+                                        xlsx_bytes,
+                                        existing_file_id=existing["id"],
+                                    )
+                                    status = "overwritten"
+                                else:
+                                    status = "download_only"
+                                results.append({
+                                    "name": file_name,
+                                    "status": status,
+                                    "updated": summary["updated"],
+                                    "not_found": summary["not_found"],
+                                    "empty_sku": summary["empty_sku"],
+                                    "bytes": xlsx_bytes,
+                                })
+                            except Exception as file_err:
+                                results.append({
+                                    "name": file_name,
+                                    "error": _hist_fix_error_text(file_err),
+                                })
+                        st.session_state["hist_import_results"] = results
+                    except Exception as e:
+                        st.error(f"❌ 無法讀取統整表：{_hist_fix_error_text(e)}")
+                        st.session_state["hist_import_results"] = []
+
+        if st.session_state.get("hist_import_results"):
+            _show_hist_fix_results(st.session_state["hist_import_results"], "hist_import")
+
+        st.write("---")
+        st.subheader("🔄 批次修正雲端既有單據")
+        if not hist_files:
+            st.warning("💡 目前雲端無歷史單據可修正。")
+        else:
+            hist_names = [f["name"] for f in hist_files]
+            selected_fix_files = st.multiselect(
+                "選擇要修正的歷史入庫單：",
+                hist_names,
+                default=hist_names,
+                key="hist_inward_fix_select",
+            )
+            if st.button("✨ 依統整表更新所選單據的庫存貨品名稱", type="primary", use_container_width=True, key="hist_inward_fix_btn"):
+                if not selected_fix_files:
+                    st.error("❌ 請至少選擇一張歷史入庫單。")
+                else:
+                    with st.spinner("⏳ 正在對照統整表並覆寫雲端單據..."):
+                        try:
+                            name_map, empty_sku_barcodes = load_barcode_to_sitegiant_name_map(summary_file_id)
+                            results = []
+                            for file_name in selected_fix_files:
+                                existing = hist_by_name.get(file_name)
+                                if not existing:
+                                    results.append({"name": file_name, "error": "雲端找不到該檔案"})
+                                    continue
+                                try:
+                                    file_bytes = download_gdrive_file_to_bytes(existing["id"])
+                                    df_in = _read_inward_excel(file_bytes)
+                                    _, summary, xlsx_bytes = _fix_inward_df_from_summary(
+                                        df_in, name_map, empty_sku_barcodes
+                                    )
+                                    upload_or_update_gdrive_file(
+                                        ID_HISTORY_INWARD_FOLDER,
+                                        _xlsx_filename(file_name),
+                                        xlsx_bytes,
+                                        existing_file_id=existing["id"],
+                                    )
+                                    results.append({
+                                        "name": file_name,
+                                        "status": "overwritten",
+                                        "updated": summary["updated"],
+                                        "not_found": summary["not_found"],
+                                        "empty_sku": summary["empty_sku"],
+                                        "bytes": xlsx_bytes,
+                                    })
+                                except Exception as file_err:
+                                    results.append({
+                                        "name": file_name,
+                                        "error": _hist_fix_error_text(file_err),
+                                    })
+                            st.session_state["hist_fix_results"] = results
+                        except Exception as e:
+                            st.error(f"❌ 無法讀取統整表：{_hist_fix_error_text(e)}")
+                            st.session_state["hist_fix_results"] = []
+
+            if st.session_state.get("hist_fix_results"):
+                _show_hist_fix_results(st.session_state["hist_fix_results"], "hist_fix")
+
+        st.write("---")
+        st.subheader("📊 歷史入庫單與成本稅款加總指標檢視")
+        if not hist_files:
+            st.warning("💡 目前雲端無歷史單據。")
         else:
             file_options = {f['name']: f['id'] for f in hist_files}
             selected_hist_file = st.selectbox("🎯 選擇欲調閱的入庫對帳單：", list(file_options.keys()))

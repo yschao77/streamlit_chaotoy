@@ -455,6 +455,55 @@ def load_sitegiant_batch_name_map(folder_id):
     return dict(zip(df["_upc"], df["_name"])), latest
 
 
+def load_barcode_to_sitegiant_name_map(file_id):
+    """統整表 c -> sitegiant庫存SKU。空值不進 map；另回傳 SKU 空白的條碼集合。"""
+    if not file_id:
+        raise ValueError("找不到商品蝦皮麗嬰價格統整表")
+    engine_kw = {"engine": "calamine"} if HAS_CALAMINE else {}
+    df = pd.read_excel(download_gdrive_file_to_bytes(file_id), dtype=str, **engine_kw)
+    df.columns = df.columns.astype(str).str.strip().str.replace("\n", "")
+    if "c" not in df.columns or "sitegiant庫存SKU" not in df.columns:
+        raise ValueError("統整表缺少「c」或「sitegiant庫存SKU」欄位")
+    df["_bc"] = df["c"].map(clean_barcode)
+    df["_name"] = df["sitegiant庫存SKU"].map(lambda x: str(x).strip() if pd.notna(x) else "")
+    all_barcodes = set(df.loc[df["_bc"] != "", "_bc"])
+    filled = df[(df["_bc"] != "") & (~df["_name"].isin(["", "nan", "None"]))]
+    filled = filled.drop_duplicates(subset=["_bc"], keep="last")
+    name_map = dict(zip(filled["_bc"], filled["_name"]))
+    empty_sku_barcodes = all_barcodes - set(name_map.keys())
+    return name_map, empty_sku_barcodes
+
+
+def apply_sitegiant_name_from_summary(df, name_map, empty_sku_barcodes=None):
+    """以國際條碼對 name_map，覆寫庫存貨品名稱。不改庫存SKU / 成本 / 稅款。"""
+    empty_sku_barcodes = set(empty_sku_barcodes or [])
+    out = df.copy()
+    out.columns = out.columns.astype(str).str.strip().str.replace("\n", "")
+    if "國際條碼" not in out.columns:
+        raise ValueError("檔案缺少「國際條碼」欄位")
+    if "庫存貨品名稱" not in out.columns:
+        out["庫存貨品名稱"] = ""
+
+    barcodes = out["國際條碼"].map(clean_barcode)
+    mapped = barcodes.map(lambda x: name_map.get(x) if x else None)
+    has_name = mapped.notna() & (mapped.astype(str).str.strip() != "")
+
+    old_names = out["庫存貨品名稱"].where(out["庫存貨品名稱"].notna(), "").astype(str).str.strip()
+    new_names = mapped.where(has_name, old_names).astype(str).str.strip()
+    out.loc[has_name, "庫存貨品名稱"] = mapped[has_name]
+    updated = int((has_name & (old_names != new_names)).sum())
+
+    valid_bc = barcodes != ""
+    unmatched = valid_bc & ~has_name
+    is_empty_sku = unmatched & barcodes.isin(empty_sku_barcodes)
+    is_not_found = unmatched & ~is_empty_sku
+    return out, {
+        "updated": updated,
+        "not_found": barcodes[is_not_found].tolist(),
+        "empty_sku": barcodes[is_empty_sku].tolist(),
+    }
+
+
 def build_price_summary_df(master_file_id, local_prod_id, shopee_master_id, sitegiant_batch_folder_id=None):
     """三表整合 + 以 c=UPC 填入 sitegiant庫存SKU（庫存貨品名稱）。"""
     engine_kw = {"engine": "calamine"} if HAS_CALAMINE else {}
