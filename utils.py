@@ -86,70 +86,9 @@ def _stop_or_raise(msg):
     raise RuntimeError(msg)
 
 
-# #region agent log
-_AGENT_DEBUG_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug-5acaec.log")
-
-
-def _agent_dbg(hypothesis_id, location, message, data, run_id="pre-fix"):
-    payload = {
-        "sessionId": "5acaec",
-        "runId": run_id,
-        "hypothesisId": hypothesis_id,
-        "location": location,
-        "message": message,
-        "data": data,
-        "timestamp": int(__import__("time").time() * 1000),
-    }
-    try:
-        with open(_AGENT_DEBUG_LOG, "a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    try:
-        print(f"[debug:{hypothesis_id}] {message} {json.dumps(data, ensure_ascii=False)}")
-    except Exception:
-        pass
-
-
-def _pem_debug_meta(pk):
-    if pk is None:
-        return {"present": False}
-    if not isinstance(pk, str):
-        return {"present": True, "py_type": type(pk).__name__}
-    lines = pk.splitlines()
-    first_raw = lines[0] if lines else ""
-    first = first_raw.strip().lstrip("\ufeff")
-    last = lines[-1].strip() if lines else ""
-    return {
-        "present": True,
-        "py_type": "str",
-        "len": len(pk),
-        "line_count": len(lines),
-        "has_lf": "\n" in pk,
-        "has_cr": "\r" in pk,
-        "literal_backslash_n": "\\n" in pk,
-        "has_bom": pk.startswith("\ufeff") or first_raw.startswith("\ufeff"),
-        "begin_anywhere": "-----BEGIN " in pk,
-        "first_line_has_begin": "BEGIN" in first_raw,
-        "first_line_len": len(first_raw),
-        "first_ords": [ord(c) for c in first_raw[:8]],
-        "startswith_begin": first.startswith("-----BEGIN "),
-        "first_is_pem_header": bool(re.match(r"^-----BEGIN [A-Z0-9 ]+-----$", first)),
-        "has_end_marker": any(ln.strip().startswith("-----END ") for ln in lines),
-        "last_is_pem_footer": bool(re.match(r"^-----END [A-Z0-9 ]+-----$", last)),
-        "header": first if first.startswith("-----BEGIN ") else "NON_HEADER",
-        "footer": last if last.startswith("-----END ") else "NON_FOOTER",
-        "leading_quote": pk[:1] in ("'", '"'),
-    }
-# #endregion
-
-
 def _fix_private_key_pem(pk):
     if not isinstance(pk, str) or not pk.strip():
         return pk
-    # #region agent log
-    _agent_dbg("H6-H8", "utils.py:_fix_private_key_pem", "pem before header repair", _pem_debug_meta(pk), run_id="pem-header-fix")
-    # #endregion
     pk = pk.replace("\ufeff", "").strip()
     if (pk.startswith('"') and pk.endswith('"')) or (pk.startswith("'") and pk.endswith("'")):
         pk = pk[1:-1].strip()
@@ -172,9 +111,6 @@ def _fix_private_key_pem(pk):
         pk = re.sub(r"(-----END [A-Z0-9 ]+-----)", r"\n\1", pk)
     if not pk.endswith("\n"):
         pk += "\n"
-    # #region agent log
-    _agent_dbg("H6-H8", "utils.py:_fix_private_key_pem", "pem after header repair", _pem_debug_meta(pk), run_id="pem-header-fix")
-    # #endregion
     return pk
 
 
@@ -205,49 +141,14 @@ def _coerce_service_account_info(raw):
 def load_google_service_account_info():
     env_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
     if env_json:
-        # #region agent log
-        _agent_dbg("H1-H3", "utils.py:load_google_service_account_info", "env json present", {
-            "env_len": len(env_json),
-            "env_stripped_len": len(env_json.strip()),
-            "env_startswith_curly": env_json.lstrip().startswith("{"),
-            "env_has_lf": "\n" in env_json,
-            "env_has_cr": "\r" in env_json,
-        })
-        # #endregion
-        info = _coerce_service_account_info(env_json)
-        # #region agent log
-        pk = info.get("private_key") if isinstance(info, dict) else None
-        _agent_dbg("H1-H5", "utils.py:load_google_service_account_info", "parsed env json", {
-            "info_type": type(info).__name__,
-            "sa_type": info.get("type") if isinstance(info, dict) else None,
-            "has_client_email": bool(isinstance(info, dict) and info.get("client_email")),
-            "pem": _pem_debug_meta(pk),
-        })
-        # #endregion
-        return info
+        return _coerce_service_account_info(env_json)
     env_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
     if env_path and os.path.isfile(env_path):
         with open(env_path, encoding="utf-8") as f:
-            info = _coerce_service_account_info(json.load(f))
-        # #region agent log
-        pk = info.get("private_key") if isinstance(info, dict) else None
-        _agent_dbg("H5", "utils.py:load_google_service_account_info", "loaded credentials file", {
-            "pem": _pem_debug_meta(pk),
-        })
-        # #endregion
-        return info
+            return _coerce_service_account_info(json.load(f))
     try:
-        info = _coerce_service_account_info(st.secrets["textkey"])
-        # #region agent log
-        _agent_dbg("H5", "utils.py:load_google_service_account_info", "loaded streamlit secrets", {
-            "pem": _pem_debug_meta(info.get("private_key") if info else None),
-        })
-        # #endregion
-        return info
+        return _coerce_service_account_info(st.secrets["textkey"])
     except Exception:
-        # #region agent log
-        _agent_dbg("H5", "utils.py:load_google_service_account_info", "no credentials found", {})
-        # #endregion
         return None
 
 
@@ -255,21 +156,7 @@ def _build_drive_service():
     info = load_google_service_account_info()
     if not info:
         raise RuntimeError("缺少 Google 憑證：請設定 GOOGLE_SERVICE_ACCOUNT_JSON 或 Streamlit Secrets `textkey`。")
-    try:
-        credentials = service_account.Credentials.from_service_account_info(info, scopes=DRIVE_SCOPES)
-        # #region agent log
-        _agent_dbg("H1-H4", "utils.py:_build_drive_service", "credentials loaded", {"ok": True})
-        # #endregion
-    except Exception as e:
-        # #region agent log
-        pk = info.get("private_key") if isinstance(info, dict) else None
-        _agent_dbg("H1-H4", "utils.py:_build_drive_service", "credentials load failed", {
-            "exc_type": type(e).__name__,
-            "exc": str(e)[:180],
-            "pem": _pem_debug_meta(pk),
-        })
-        # #endregion
-        raise
+    credentials = service_account.Credentials.from_service_account_info(info, scopes=DRIVE_SCOPES)
     return build("drive", "v3", credentials=credentials)
 
 
