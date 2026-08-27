@@ -4,8 +4,7 @@ name: Debug schedule probe
 
 on:
   schedule:
-    - cron: "15,45,50 * * * *"
-      timezone: "Asia/Taipei"
+    - cron: "5,10,15,50 * * * *"
   workflow_dispatch:
 
 permissions:

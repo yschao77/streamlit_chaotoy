@@ -3,7 +3,6 @@ name: Sync Drive sources
 on:
   schedule:
     - cron: "30,40 * * * *"
-      timezone: "Asia/Taipei"
   workflow_dispatch:
 
 permissions:
