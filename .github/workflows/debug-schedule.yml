@@ -4,7 +4,8 @@ name: Debug schedule probe
 
 on:
   schedule:
-    - cron: "5,10,15,50 * * * *"
+    # 07:00 Taipei = 23:00 UTC
+    - cron: "0 23 * * *"
   workflow_dispatch:
 
 permissions:
