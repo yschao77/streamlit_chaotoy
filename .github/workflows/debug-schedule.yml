@@ -1,0 +1,39 @@
+# TEMPORARY: schedule-probe only. Does not touch Drive/Excel.
+# Delete this file after confirming whether GitHub fires `schedule` at all.
+name: Debug schedule probe
+
+on:
+  schedule:
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      # #region agent log
+      - name: Record whether GitHub fired schedule
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SCHEDULE: ${{ github.event.schedule }}
+          GIT_REF: ${{ github.ref }}
+          ACTOR: ${{ github.actor }}
+          RUN_ID: ${{ github.run_id }}
+          WORKFLOW: ${{ github.workflow }}
+        run: |
+          echo "sessionId=2c11ef"
+          echo "hypothesisId=A-C-E"
+          echo "event_name=$EVENT_NAME"
+          echo "event.schedule=$EVENT_SCHEDULE"
+          echo "ref=$GIT_REF"
+          echo "actor=$ACTOR"
+          echo "run_id=$RUN_ID"
+          echo "workflow=$WORKFLOW"
+          date -u +"utc=%Y-%m-%dT%H:%M:%SZ"
+          {
+            echo "### Debug schedule probe"
+            echo "- event_name: \`$EVENT_NAME\`"
+            echo "- schedule: \`$EVENT_SCHEDULE\`"
+            echo "- ref: \`$GIT_REF\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+      # #endregion
