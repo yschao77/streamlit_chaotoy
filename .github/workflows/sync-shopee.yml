@@ -2,8 +2,12 @@ name: Sync Drive sources
 
 on:
   schedule:
-    - cron: "0 2 * * *"
+    - cron: "18 10 * * *"
+      timezone: "Asia/Taipei"
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   sync:
@@ -19,7 +23,7 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: |
           echo "sessionId=2c11ef"
-          echo "hypothesisId=A-E"
+          echo "hypothesisId=G"
           echo "event_name=$EVENT_NAME"
           echo "event.schedule=$EVENT_SCHEDULE"
           echo "ref=$GIT_REF"
@@ -34,27 +38,40 @@ jobs:
             echo "- actor: \`$ACTOR\`"
           } >> "$GITHUB_STEP_SUMMARY"
       # #endregion
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - name: Checkout repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # #region agent log
+          echo "sessionId=2c11ef"
+          echo "hypothesisId=G"
+          echo "checkout_method=git_fetch"
+          echo "sha=${GITHUB_SHA}"
+          # #endregion
+          git init
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git -c "http.extraheader=AUTHORIZATION: bearer ${GH_TOKEN}" fetch --depth 1 origin "${GITHUB_SHA}"
+          git checkout --force --detach FETCH_HEAD
+          test -f scripts/sync_shopee_from_gdrive.py
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          python3 --version
+          python3 -m pip install --user -r requirements.txt
       - name: Correct latest mass_update into Shopee master
         continue-on-error: true
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-        run: python scripts/sync_shopee_from_gdrive.py
+        run: python3 scripts/sync_shopee_from_gdrive.py
       - name: Rebuild price summary from three tables
         continue-on-error: true
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-        run: python scripts/sync_price_summary.py
+        run: python3 scripts/sync_price_summary.py
       - name: Fill latest Sitegiant UPC file
         continue-on-error: true
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-        run: python scripts/sync_sitegiant_upc.py
+        run: python3 scripts/sync_sitegiant_upc.py
       - name: Report spreadsheet modified times
         if: always()
         env:
@@ -65,4 +82,4 @@ jobs:
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           SMTP_FROM: ${{ secrets.SMTP_FROM }}
-        run: python scripts/report_gdrive_status.py
+        run: python3 scripts/report_gdrive_status.py

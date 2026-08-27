@@ -4,8 +4,14 @@ name: Debug schedule probe
 
 on:
   schedule:
-    - cron: "7,22,37,52 * * * *"
+    - cron: "18 22 * * *"
+      timezone: "Asia/Taipei"
+    - cron: "18 10 * * *"
+      timezone: "Asia/Taipei"
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   probe:
@@ -20,9 +26,10 @@ jobs:
           ACTOR: ${{ github.actor }}
           RUN_ID: ${{ github.run_id }}
           WORKFLOW: ${{ github.workflow }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           echo "sessionId=2c11ef"
-          echo "hypothesisId=A-C-E"
+          echo "hypothesisId=F"
           echo "event_name=$EVENT_NAME"
           echo "event.schedule=$EVENT_SCHEDULE"
           echo "ref=$GIT_REF"
@@ -30,10 +37,13 @@ jobs:
           echo "run_id=$RUN_ID"
           echo "workflow=$WORKFLOW"
           date -u +"utc=%Y-%m-%dT%H:%M:%SZ"
+          echo "taipei=$(TZ=Asia/Taipei date +%Y-%m-%dT%H:%M:%S)"
+          META=$(gh api "repos/${GITHUB_REPOSITORY}" --jq '{private:.private,fork:.fork,default_branch:.default_branch,visibility:.visibility}')
+          echo "repo_meta=$META"
           {
             echo "### Debug schedule probe"
             echo "- event_name: \`$EVENT_NAME\`"
             echo "- schedule: \`$EVENT_SCHEDULE\`"
-            echo "- ref: \`$GIT_REF\`"
+            echo "- repo: \`$META\`"
           } >> "$GITHUB_STEP_SUMMARY"
       # #endregion
