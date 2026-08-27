@@ -4,7 +4,7 @@ name: Debug schedule probe
 
 on:
   schedule:
-    - cron: "18 22 * * *"
+    - cron: "30 22 * * *"
       timezone: "Asia/Taipei"
     - cron: "18 10 * * *"
       timezone: "Asia/Taipei"
