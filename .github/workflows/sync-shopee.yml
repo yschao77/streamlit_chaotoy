@@ -6,7 +6,7 @@ name: Sync Drive sources
 on:
   schedule:
     # 07:00 Taipei
-    - cron: "0 23 * * *"
+    - cron: "0 25 * * *"
   workflow_dispatch:
   repository_dispatch:
     types: [sync-drive]
