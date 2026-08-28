@@ -1,62 +1,65 @@
 name: Sync Drive sources
 
+# Runs on GitHub-hosted runners, so it is independent of the Streamlit Cloud app:
+# the sync works whether that app is awake or asleep. `repository_dispatch` lets an
+# external scheduler start a run when GitHub's own cron queue drops the schedule.
 on:
   schedule:
-    # 07:00 Taipei = 23:00 UTC
+    # 07:00 Taipei
     - cron: "0 23 * * *"
   workflow_dispatch:
+  repository_dispatch:
+    types: [sync-drive]
+  push:
+    branches: [main]
+    paths:
+      - "scripts/**"
+      - "utils.py"
+      - "requirements.txt"
+      - ".github/workflows/sync-shopee.yml"
 
 permissions:
   contents: read
 
+concurrency:
+  group: sync-drive-sources
+  cancel-in-progress: false
+
 jobs:
   sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      # #region agent log
-      - name: Debug trigger metadata
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          EVENT_SCHEDULE: ${{ github.event.schedule }}
-          GIT_REF: ${{ github.ref }}
-          ACTOR: ${{ github.actor }}
-          RUN_ID: ${{ github.run_id }}
+      - name: Show trigger
         run: |
-          echo "sessionId=2c11ef"
-          echo "hypothesisId=G"
-          echo "event_name=$EVENT_NAME"
-          echo "event.schedule=$EVENT_SCHEDULE"
-          echo "ref=$GIT_REF"
-          echo "actor=$ACTOR"
-          echo "run_id=$RUN_ID"
+          echo "event=${{ github.event_name }}"
+          echo "schedule=${{ github.event.schedule }}"
+          echo "actor=${{ github.actor }}"
           date -u +"utc=%Y-%m-%dT%H:%M:%SZ"
           {
-            echo "### Debug trigger"
-            echo "- event_name: \`$EVENT_NAME\`"
-            echo "- schedule: \`$EVENT_SCHEDULE\`"
-            echo "- ref: \`$GIT_REF\`"
-            echo "- actor: \`$ACTOR\`"
+            echo "### Trigger"
+            echo "- event: \`${{ github.event_name }}\`"
+            echo "- actor: \`${{ github.actor }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
-      # #endregion
+      - name: Wake Streamlit app
+        if: vars.STREAMLIT_APP_URL != ''
+        continue-on-error: true
+        env:
+          APP_URL: ${{ vars.STREAMLIT_APP_URL }}
+        run: |
+          status=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 90 "$APP_URL" || echo 000)
+          echo "streamlit_http_status=$status"
+          echo "- streamlit app: \`$status\`" >> "$GITHUB_STEP_SUMMARY"
       - name: Checkout repository
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # #region agent log
-          echo "sessionId=2c11ef"
-          echo "hypothesisId=G"
-          echo "checkout_method=git_fetch"
-          echo "sha=${GITHUB_SHA}"
-          # #endregion
           git init
           git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
           git -c "http.extraheader=AUTHORIZATION: bearer ${GH_TOKEN}" fetch --depth 1 origin "${GITHUB_SHA}"
           git checkout --force --detach FETCH_HEAD
-          test -f scripts/sync_shopee_from_gdrive.py
       - name: Install dependencies
-        run: |
-          python3 --version
-          python3 -m pip install --user -r requirements.txt
+        run: python3 -m pip install --user -r requirements.txt
       - name: Correct latest mass_update into Shopee master
         continue-on-error: true
         env:
