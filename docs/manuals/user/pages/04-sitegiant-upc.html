@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sitegiant 批量新增UPC</title>
+  <link rel="stylesheet" href="../../assets/manual.css">
+</head>
+<body>
+  <header class="topbar">
+    <a href="../../index.html">手冊首頁</a>
+    <span class="sep">/</span>
+    <a href="../index.html">使用者手冊</a>
+  </header>
+  <div class="layout">
+    <nav class="sidebar">
+      <h2>使用者手冊</h2>
+      <a href="../index.html">總覽</a>
+      <a href="01-cloud-status.html">各表最新修改時間</a>
+      <a href="02-sitegiant-inward.html">Sitegiant 採購入庫單格式轉換</a>
+      <a href="03-sitegiant-history.html">Sitegiant 歷史入庫單紀錄</a>
+      <a class="current" href="04-sitegiant-upc.html">Sitegiant 批量新增UPC</a>
+      <a href="05-pending-po.html">採購單待處理</a>
+      <a href="06-powerquery.html">PowerQuery 執行三表整合</a>
+      <a href="07-liying-merge.html">麗嬰商品表合併和與審核</a>
+      <a href="08-shopee-convert.html">蝦皮商品清單轉換</a>
+      <a href="09-powerquery-history.html">PowerQuery 三表整合歷史紀錄</a>
+      <a href="10-product-query.html">商品清單紀錄查詢</a>
+      <a href="11-liying-query.html">麗嬰商品總表數據查詢</a>
+    </nav>
+    <main>
+      <nav class="crumb">使用者手冊 ➔ Sitegiant 批量新增UPC</nav>
+      <h1>Sitegiant 批量新增UPC</h1>
+      <aside class="bullets">
+        <h2>本頁重點</h2>
+        <ul>
+          <li>用已校正的蝦皮列表（iSKU → GTIN）填 Sitegiant 空白 UPC。</li>
+          <li>只填「目前空白」的列，不會改已有 UPC。</li>
+          <li>結果下載後，再上傳回 Sitegiant 批量編輯。</li>
+        </ul>
+      </aside>
+      <h2>何時使用</h2>
+      <p>Sitegiant 商品缺國際條碼，而蝦皮列表已有對應 GTIN。</p>
+      <h2>前置條件</h2>
+      <ol>
+        <li>已確認 iSKU 對應 UPC／GTIN。</li>
+        <li>把批量編輯 UPC 檔放到雲端 <code>Sitegiant_UPC</code>（xlsx 或 zip）：<code>batch_edit_item_upc_assignment_all_DD-MM-YYYY-*.xlsx</code></li>
+        <li>已在「蝦皮商品清單轉換」校正並回寫蝦皮主表。</li>
+      </ol>
+      <h2>操作步驟</h2>
+      <ol>
+        <li>確認頁面顯示最新 UPC 來源檔名稱與時間。</li>
+        <li>按 <strong>從雲端最新 UPC 檔填補</strong>。</li>
+        <li>看成功筆數與預覽。</li>
+        <li>下載結果，或到雲端取 <code>batch_edit_upc_added_only.xlsx</code>。</li>
+        <li>上傳回 Sitegiant 覆蓋。</li>
+      </ol>
+      <p>備用：展開「手動上傳 UPC 檔」。手動上傳預設不寫回雲端結果檔。</p>
+      <h2>預期檔案</h2>
+      <ul>
+        <li>讀：最新 <code>batch_edit_item_upc_assignment_all_*.xlsx</code></li>
+        <li>讀：<code>蝦皮賣場商品列表.xlsm</code></li>
+        <li>寫：<code>batch_edit_upc_added_only.xlsx</code></li>
+      </ul>
+      <div class="callout file"><strong>權限</strong>寫回雲端時，service account 需要對 <code>Sitegiant_UPC</code> 有編輯者權限。</div>
+      <h2>常見問題</h2>
+      <ul>
+        <li><strong>無法讀取蝦皮商品列表</strong>：先做蝦皮商品清單轉換。</li>
+        <li><strong>找不到 UPC 來源檔</strong>：檔名或日期格式不對。</li>
+        <li><strong>未找到可填補的缺失 UPC</strong>：SKU 對不到有效 GTIN，或沒有空白 UPC。</li>
+        <li><strong>找不到 SKU 或 UPC 欄</strong>：匯出檔欄名系統認不得。</li>
+      </ul>
+      <nav class="pager">
+        <a href="03-sitegiant-history.html">上一頁：歷史入庫單紀錄</a>
+        <a href="05-pending-po.html">下一頁：採購單待處理</a>
+      </nav>
+    </main>
+  </div>
+</body>
+</html>

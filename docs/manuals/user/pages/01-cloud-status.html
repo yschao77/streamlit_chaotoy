@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>各表最新修改時間</title>
+  <link rel="stylesheet" href="../../assets/manual.css">
+</head>
+<body>
+  <header class="topbar">
+    <a href="../../index.html">手冊首頁</a>
+    <span class="sep">/</span>
+    <a href="../index.html">使用者手冊</a>
+  </header>
+  <div class="layout">
+    <nav class="sidebar">
+      <h2>使用者手冊</h2>
+      <a href="../index.html">總覽</a>
+      <a class="current" href="01-cloud-status.html">各表最新修改時間</a>
+      <a href="02-sitegiant-inward.html">Sitegiant 採購入庫單格式轉換</a>
+      <a href="03-sitegiant-history.html">Sitegiant 歷史入庫單紀錄</a>
+      <a href="04-sitegiant-upc.html">Sitegiant 批量新增UPC</a>
+      <a href="05-pending-po.html">採購單待處理</a>
+      <a href="06-powerquery.html">PowerQuery 執行三表整合</a>
+      <a href="07-liying-merge.html">麗嬰商品表合併和與審核</a>
+      <a href="08-shopee-convert.html">蝦皮商品清單轉換</a>
+      <a href="09-powerquery-history.html">PowerQuery 三表整合歷史紀錄</a>
+      <a href="10-product-query.html">商品清單紀錄查詢</a>
+      <a href="11-liying-query.html">麗嬰商品總表數據查詢</a>
+    </nav>
+    <main>
+      <nav class="crumb">使用者手冊 ➔ 各表最新修改時間</nav>
+      <h1>各表最新修改時間</h1>
+      <aside class="bullets">
+        <h2>本頁重點</h2>
+        <ul>
+          <li>列出各 Drive 來源「最新一檔」與台北時間。</li>
+          <li>「已接入流程」會被程式讀寫；其餘蝦皮資料夾只監看。</li>
+          <li>按「重新整理狀態」可清快取再掃一次。</li>
+        </ul>
+      </aside>
+      <p>路徑：雲端資料狀態 → 各表最新修改時間</p>
+      <h2>何時使用</h2>
+      <p>每日開工、懷疑檔案沒上傳、或定時同步前後，用來確認來源是否到齊。</p>
+      <h2>操作步驟</h2>
+      <ol>
+        <li>左側選 <strong>雲端資料狀態</strong> → <strong>各表最新修改時間</strong>。</li>
+        <li>看表格：資料夾、檔名、修改時間、用途。</li>
+        <li>需要最新狀態時，按 <strong>重新整理狀態</strong>。</li>
+      </ol>
+      <h2>表格怎麼看</h2>
+      <table>
+        <thead><tr><th>用途</th><th>意思</th></tr></thead>
+        <tbody>
+          <tr><td>已接入流程</td><td>入庫、三表整合、蝦皮校正、UPC 會用到</td></tr>
+          <tr><td>僅監看</td><td>例如蝦皮媒體、標題描述、配送、未上架；不會寫入主表</td></tr>
+        </tbody>
+      </table>
+      <p>已接入：麗嬰總表、商品列表、蝦皮賣場列表、價格統整表、Sitegiant UPC、Sitegiant BasicInfo、蝦皮價格及庫存。</p>
+      <h2>預期檔名（節錄）</h2>
+      <ul>
+        <li><code>麗嬰採購產品總表.xlsm</code></li>
+        <li><code>商品列表.xlsx</code></li>
+        <li><code>蝦皮賣場商品列表.xlsm</code></li>
+        <li><code>商品蝦皮麗嬰價格統整表.xlsx</code></li>
+        <li><code>batch_edit_item_upc_assignment_all_DD-MM-YYYY-*.xlsx</code>（或 zip）</li>
+        <li><code>batch_edit_basic_info_all_DD-MM-YYYY-*.xlsx</code>（或 zip）</li>
+        <li><code>mass_update_sales_info_3062950_YYYYMMDD*.xlsx</code></li>
+      </ul>
+      <h2>常見問題</h2>
+      <ul>
+        <li><strong>掃描失敗（憑證缺失／無效或資料夾無權限）</strong>：找工程師；不要把金鑰貼到聊天或畫面。</li>
+        <li><strong>某列沒有檔名</strong>：該資料夾是空的，或 service account 沒有檢視權限。</li>
+        <li><strong>時間看起來舊</strong>：來源還沒上傳，或按重新整理。</li>
+      </ul>
+      <div class="callout info">「每日郵件摘要」尚未啟用寄信；定時同步仍會把同一份狀態寫進 GitHub Actions 工作摘要。</div>
+      <nav class="pager">
+        <a href="../index.html">上一頁：總覽</a>
+        <a href="02-sitegiant-inward.html">下一頁：採購入庫單格式轉換</a>
+      </nav>
+    </main>
+  </div>
+</body>
+</html>

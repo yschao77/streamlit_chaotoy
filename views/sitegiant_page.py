@@ -640,7 +640,7 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
                 st.success(
                     f"將處理最新來源檔：`{latest_upc['name']}` ｜ 📅 `{format_gdrive_time(latest_upc.get('modifiedTime'))}`"
                 )
-                st.caption("寫回雲端結果檔時，service account 需要對 Sitegiant_UPC 資料夾有「編輯者」權限。")
+                st.caption("寫回 `batch_edit_upc_added_only.xlsx`：請先在資料夾手動建立此檔，service account 只能覆寫、不能新建。")
             else:
                 st.error("❌ 資料夾內找不到 `batch_edit_item_upc_assignment_all_DD-MM-YYYY-*.xlsx/.zip`。")
 
@@ -660,7 +660,7 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
                             UPC_FILLED_FILENAME,
                             towrite_sg.getvalue(),
                             existing_file_id=existing["id"] if existing else None,
-                            allow_create=True,
+                            allow_create=False,
                         )
                         st.info(f"☁️ 已寫回雲端 `{UPC_FILLED_FILENAME}`，請再上傳至 Sitegiant。")
                 else:

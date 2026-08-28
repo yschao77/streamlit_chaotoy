@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>架構與資料流</title>
+  <link rel="stylesheet" href="../../assets/manual.css">
+</head>
+<body>
+  <header class="topbar">
+    <a href="../../index.html">手冊首頁</a>
+    <span class="sep">/</span>
+    <a href="../index.html">工程師手冊</a>
+  </header>
+  <div class="layout">
+    <nav class="sidebar">
+      <h2>工程師手冊</h2>
+      <a href="../index.html">總覽</a>
+      <a class="current" href="01-architecture.html">架構與資料流</a>
+      <a href="02-setup.html">本機啟動與憑證</a>
+      <a href="03-file-roles.html">檔案職責</a>
+      <a href="04-gdrive-excel.html">Google Drive 與 Excel</a>
+      <a href="05-ci-sync.html">定時同步</a>
+      <a href="06-conventions-troubleshooting.html">開發慣例與故障排除</a>
+    </nav>
+    <main>
+      <nav class="crumb">工程師手冊 ➔ 架構與資料流</nav>
+      <h1>架構與資料流</h1>
+      <aside class="bullets">
+        <h2>本頁重點</h2>
+        <ul>
+          <li>Streamlit 單頁應用；側邊欄 selectbox 選模組、radio 選子頁。</li>
+          <li>Drive／Excel 的唯一實作在 <code>utils.py</code>；<code>views/</code> 只 render。</li>
+          <li>三表整合與蝦皮／UPC 同步，畫面與 CLI 走同一組函式。</li>
+        </ul>
+      </aside>
+      <h2>執行時資料流</h2>
+      <ol>
+        <li><code>app.py</code> 設定 page_config、套用 openpyxl patch、用關鍵字查出主檔 ID。</li>
+        <li>組成 <code>gdrive_cfg</code>（或個別 Drive ID）傳給 <code>views/*.render</code>。</li>
+        <li>子頁開頭固定：<code>st.title</code> + 麵包屑。</li>
+        <li>讀檔／寫檔都走 utils 的 Drive 函式。</li>
+      </ol>
+      <pre><code>使用者 → app.py 路由 → views/* → utils.py → Google Drive Excel/xlsm</code></pre>
+      <h2>三個模組</h2>
+      <table>
+        <thead><tr><th>側邊欄模組</th><th>檔案</th><th>子頁</th></tr></thead>
+        <tbody>
+          <tr><td>雲端資料狀態</td><td><code>views/status_page.py</code></td><td>各表最新修改時間</td></tr>
+          <tr><td>Sitegiant 電商整合管理</td><td><code>views/sitegiant_page.py</code></td><td>入庫、歷史、UPC、待處理</td></tr>
+          <tr><td>商品蝦皮麗嬰統整管理</td><td><code>views/integration_page.py</code></td><td>三表、麗嬰審核、蝦皮、查詢</td></tr>
+        </tbody>
+      </table>
+      <p>新子頁：先在 <code>app.py</code> 的 radio 加字串，再在對應 views 加 <code>if sub_page == "..."</code>。字串必須完全一致。</p>
+      <h2>對鍵與計算</h2>
+      <ul>
+        <li>商品列表 ⟕ 蝦皮（<code>自定義編碼</code> = <code>iSKU</code>）</li>
+        <li>再 ⟕ 麗嬰（<code>c</code> = <code>條碼</code>）</li>
+        <li><code>sitegiant庫存SKU</code>：<code>c</code> 對 batch_edit UPC 的庫存貨品名稱</li>
+      </ul>
+      <p>入庫單名稱只抓 <code>sitegiant庫存SKU</code>。財務：八折 × 0.8、未稅 ÷ 1.05。</p>
+      <h2>CLI 與畫面共用</h2>
+      <table>
+        <thead><tr><th>動作</th><th>utils</th><th>script</th></tr></thead>
+        <tbody>
+          <tr><td>蝦皮 iSKU</td><td><code>run_shopee_isku_sync</code></td><td><code>scripts/sync_shopee_from_gdrive.py</code></td></tr>
+          <tr><td>三表整合</td><td><code>run_price_summary_sync</code></td><td><code>scripts/sync_price_summary.py</code></td></tr>
+          <tr><td>填 UPC</td><td><code>run_sitegiant_upc_sync</code></td><td><code>scripts/sync_sitegiant_upc.py</code></td></tr>
+          <tr><td>狀態表</td><td><code>collect_tracked_file_status</code></td><td><code>scripts/report_gdrive_status.py</code></td></tr>
+        </tbody>
+      </table>
+      <p><code>temp/</code> 是舊快照，只讀，不當實作來源。</p>
+      <nav class="pager">
+        <a href="../index.html">上一頁：總覽</a>
+        <a href="02-setup.html">下一頁：本機啟動與憑證</a>
+      </nav>
+    </main>
+  </div>
+</body>
+</html>

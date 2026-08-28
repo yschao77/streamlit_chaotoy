@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sitegiant 採購入庫單格式轉換</title>
+  <link rel="stylesheet" href="../../assets/manual.css">
+</head>
+<body>
+  <header class="topbar">
+    <a href="../../index.html">手冊首頁</a>
+    <span class="sep">/</span>
+    <a href="../index.html">使用者手冊</a>
+  </header>
+  <div class="layout">
+    <nav class="sidebar">
+      <h2>使用者手冊</h2>
+      <a href="../index.html">總覽</a>
+      <a href="01-cloud-status.html">各表最新修改時間</a>
+      <a class="current" href="02-sitegiant-inward.html">Sitegiant 採購入庫單格式轉換</a>
+      <a href="03-sitegiant-history.html">Sitegiant 歷史入庫單紀錄</a>
+      <a href="04-sitegiant-upc.html">Sitegiant 批量新增UPC</a>
+      <a href="05-pending-po.html">採購單待處理</a>
+      <a href="06-powerquery.html">PowerQuery 執行三表整合</a>
+      <a href="07-liying-merge.html">麗嬰商品表合併和與審核</a>
+      <a href="08-shopee-convert.html">蝦皮商品清單轉換</a>
+      <a href="09-powerquery-history.html">PowerQuery 三表整合歷史紀錄</a>
+      <a href="10-product-query.html">商品清單紀錄查詢</a>
+      <a href="11-liying-query.html">麗嬰商品總表數據查詢</a>
+    </nav>
+    <main>
+      <nav class="crumb">使用者手冊 ➔ Sitegiant 採購入庫單格式轉換</nav>
+      <h1>Sitegiant 採購入庫單格式轉換</h1>
+      <aside class="bullets">
+        <h2>本頁重點</h2>
+        <ul>
+          <li>貼上「國際條碼 + 數量」，對統整表產出 Sitegiant 入庫單。</li>
+          <li>廠商選「麗嬰」才帶入成本、稅款、零售與批發含稅價。</li>
+          <li>「庫存貨品名稱」來自統整表 <code>sitegiant庫存SKU</code>。缺 SKU 或缺名稱會進待處理清單。</li>
+        </ul>
+      </aside>
+      <p>路徑：Sitegiant 電商整合管理 → Sitegiant 採購入庫單格式轉換</p>
+      <h2>何時使用</h2>
+      <p>要把採購明細轉成 Sitegiant 可匯入的入庫單，並寫入歷史入庫資料夾。</p>
+      <h2>操作步驟</h2>
+      <ol>
+        <li>填 <strong>訂單／銷貨單號</strong>（預設當天 <code>YYYYMMDD01</code>）。</li>
+        <li>選 <strong>採購廠商</strong>：麗嬰、Buyee、日亞、其他（其他可自訂名稱）。</li>
+        <li>選 <strong>銷貨日期</strong>（寫入欄位為 <code>yymmdd</code>）。</li>
+        <li>從 Excel 複製「國際條碼」與「數量」兩欄，貼到文字框，按 <strong>解析並產生預覽表格</strong>。</li>
+        <li>在預覽表檢查、增刪列。</li>
+        <li>按 <strong>執行貨品名稱和成本稅款導入並紀錄待處理商品</strong>。</li>
+        <li>預覽結果後下載，並確認已上傳雲端歷史入庫資料夾。</li>
+      </ol>
+      <pre><code>4711234567890	2
+4711234567891	5</code></pre>
+      <p>只有一欄時，數量會當成 1。</p>
+      <h2>系統會填什麼</h2>
+      <p>以條碼對統整表欄位 <code>c</code>：</p>
+      <table>
+        <thead><tr><th>入庫欄</th><th>來源</th></tr></thead>
+        <tbody>
+          <tr><td>庫存SKU</td><td>統整表 <code>自定義編碼</code>；找不到則「須新增 iSKU」</td></tr>
+          <tr><td>庫存貨品名稱</td><td>統整表 <code>sitegiant庫存SKU</code>；空白則「未知商品名稱」</td></tr>
+          <tr><td>成本／稅款／麗嬰價</td><td>僅廠商為麗嬰時，來自統整表</td></tr>
+        </tbody>
+      </table>
+      <div class="callout warn">
+        <strong>待處理</strong>
+        缺 SKU 記「須建立自定義編碼」；有 SKU 但沒名稱記「須建立賣場商品」。之後同一條碼對得上會自動清掉。
+      </div>
+      <h2>預期檔案</h2>
+      <ul>
+        <li>讀：<code>商品蝦皮麗嬰價格統整表.xlsx</code></li>
+        <li>寫：歷史入庫資料夾的入庫單 <code>.xlsx</code></li>
+        <li>連動：採購單待處理清單</li>
+      </ul>
+      <p>入庫前請先跑過三表整合，否則 <code>sitegiant庫存SKU</code> 可能是空的。</p>
+      <h2>常見問題</h2>
+      <ul>
+        <li><strong>須新增 iSKU／未知商品名稱</strong>：內部列表或 Sitegiant BasicInfo 還沒對上。</li>
+        <li><strong>請填入銷貨單號</strong>：單號空白或明細表是空的。</li>
+        <li><strong>找不到統整表</strong>：先到「PowerQuery 執行三表整合」回寫雲端。</li>
+      </ul>
+      <nav class="pager">
+        <a href="01-cloud-status.html">上一頁：各表最新修改時間</a>
+        <a href="03-sitegiant-history.html">下一頁：歷史入庫單紀錄</a>
+      </nav>
+    </main>
+  </div>
+</body>
+</html>

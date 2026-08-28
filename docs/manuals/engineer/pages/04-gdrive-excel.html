@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Google Drive 與 Excel</title>
+  <link rel="stylesheet" href="../../assets/manual.css">
+</head>
+<body>
+  <header class="topbar">
+    <a href="../../index.html">手冊首頁</a>
+    <span class="sep">/</span>
+    <a href="../index.html">工程師手冊</a>
+  </header>
+  <div class="layout">
+    <nav class="sidebar">
+      <h2>工程師手冊</h2>
+      <a href="../index.html">總覽</a>
+      <a href="01-architecture.html">架構與資料流</a>
+      <a href="02-setup.html">本機啟動與憑證</a>
+      <a href="03-file-roles.html">檔案職責</a>
+      <a class="current" href="04-gdrive-excel.html">Google Drive 與 Excel</a>
+      <a href="05-ci-sync.html">定時同步</a>
+      <a href="06-conventions-troubleshooting.html">開發慣例與故障排除</a>
+    </nav>
+    <main>
+      <nav class="crumb">工程師手冊 ➔ Google Drive 與 Excel</nav>
+      <h1>Google Drive 與 Excel</h1>
+      <aside class="bullets">
+        <h2>本頁重點</h2>
+        <ul>
+          <li>來源目錄在 <code>utils.TRACKED_SOURCES</code>。</li>
+          <li>禁止 API 新建檔；沒有 <code>existing_file_id</code> 就停止。例外：<code>batch_edit_upc_added_only.xlsx</code> 可用 <code>allow_create=True</code>。</li>
+          <li>寫回 xlsm：<code>keep_vba=True</code>。條碼先 <code>clean_barcode</code>，儲存格 <code>@</code>。</li>
+        </ul>
+      </aside>
+      <h2>連線</h2>
+      <ul>
+        <li>選最新檔：<code>pick_latest_gdrive_file</code>（解析檔名日期）</li>
+        <li>Sitegiant 來源可含 zip：<code>download_source_spreadsheet</code></li>
+        <li>只讀可用 calamine；寫 xlsm 用 openpyxl + <code>keep_vba=True</code></li>
+      </ul>
+      <h2>TRACKED_SOURCES</h2>
+      <table>
+        <thead><tr><th>key</th><th>檔名慣例</th><th>接入</th></tr></thead>
+        <tbody>
+          <tr><td>liying_master</td><td><code>麗嬰採購產品總表.xlsm</code></td><td>是</td></tr>
+          <tr><td>local_prod</td><td><code>商品列表.xlsx</code></td><td>是</td></tr>
+          <tr><td>shopee_master</td><td><code>蝦皮賣場商品列表.xlsm</code></td><td>是</td></tr>
+          <tr><td>price_summary</td><td><code>商品蝦皮麗嬰價格統整表.xlsx</code></td><td>是</td></tr>
+          <tr><td>sitegiant_upc</td><td><code>batch_edit_item_upc_assignment_all_DD-MM-YYYY-*.xlsx</code></td><td>是</td></tr>
+          <tr><td>sitegiant_basic</td><td><code>batch_edit_basic_info_all_DD-MM-YYYY-*.xlsx</code></td><td>是</td></tr>
+          <tr><td>shopee_sales</td><td><code>mass_update_sales_info_3062950_YYYYMMDD*.xlsx</code></td><td>是</td></tr>
+          <tr><td>shopee_media / basic_info / shipping / unpublished</td><td>對應 mass_update / republish</td><td>否（只監看）</td></tr>
+        </tbody>
+      </table>
+      <h2>工作表</h2>
+      <table>
+        <thead><tr><th>檔案</th><th>工作表</th></tr></thead>
+        <tbody>
+          <tr><td>麗嬰採購產品總表.xlsm</td><td>麗嬰國際產品總表、已處理採購單、刪除紀錄、metadata</td></tr>
+          <tr><td>蝦皮賣場商品列表.xlsm</td><td>蝦皮商品列表、匯入檔案</td></tr>
+          <tr><td>商品蝦皮麗嬰價格統整表.xlsx</td><td>商品蝦皮麗嬰價格統整表</td></tr>
+        </tbody>
+      </table>
+      <p>蝦皮校正來源為最新 mass_update；匯入去重用 md5。歷史入庫沒有同名檔時只下載、不新建。</p>
+      <nav class="pager">
+        <a href="03-file-roles.html">上一頁：檔案職責</a>
+        <a href="05-ci-sync.html">下一頁：定時同步</a>
+      </nav>
+    </main>
+  </div>
+</body>
+</html>

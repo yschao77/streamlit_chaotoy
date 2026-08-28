@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>使用者手冊總覽</title>
+  <link rel="stylesheet" href="../assets/manual.css">
+</head>
+<body>
+  <header class="topbar">
+    <a href="../index.html">手冊首頁</a>
+    <span class="sep">/</span>
+    <strong>使用者手冊</strong>
+  </header>
+  <div class="layout">
+    <nav class="sidebar">
+      <h2>使用者手冊</h2>
+      <a class="current" href="index.html">總覽</a>
+      <a href="pages/01-cloud-status.html">各表最新修改時間</a>
+      <a href="pages/02-sitegiant-inward.html">Sitegiant 採購入庫單格式轉換</a>
+      <a href="pages/03-sitegiant-history.html">Sitegiant 歷史入庫單紀錄</a>
+      <a href="pages/04-sitegiant-upc.html">Sitegiant 批量新增UPC</a>
+      <a href="pages/05-pending-po.html">採購單待處理</a>
+      <a href="pages/06-powerquery.html">PowerQuery 執行三表整合</a>
+      <a href="pages/07-liying-merge.html">麗嬰商品表合併和與審核</a>
+      <a href="pages/08-shopee-convert.html">蝦皮商品清單轉換</a>
+      <a href="pages/09-powerquery-history.html">PowerQuery 三表整合歷史紀錄</a>
+      <a href="pages/10-product-query.html">商品清單紀錄查詢</a>
+      <a href="pages/11-liying-query.html">麗嬰商品總表數據查詢</a>
+      <div class="group">
+        <h2>其他</h2>
+        <a href="../index.html">手冊首頁</a>
+        <a href="../engineer/index.html">工程師手冊</a>
+      </div>
+    </nav>
+    <main>
+      <nav class="crumb">使用者手冊</nav>
+      <h1>使用者手冊總覽</h1>
+      <aside class="bullets">
+        <h2>本頁重點</h2>
+        <ul>
+          <li>資料都在 Google Drive，畫面只是讀寫那些 Excel。</li>
+          <li>建議每日先看雲端狀態，再校正蝦皮，再跑三表整合，最後做入庫或 UPC。</li>
+          <li>找不到檔案、重複匯入、憑證問題時，先對照該頁的「常見問題」。</li>
+        </ul>
+      </aside>
+      <p>本手冊對應畫面左側導覽：先選「核心管理模組」，再選「執行項目」。標題與 App 側邊欄相同。</p>
+      <h2>系統是什麼</h2>
+      <p>「麗嬰與蝦皮商務數據情報中心」幫你把三邊商品資料對在一起：</p>
+      <table>
+        <thead><tr><th>詞</th><th>意思</th><th>雲端檔</th></tr></thead>
+        <tbody>
+          <tr><td>麗嬰</td><td>採購／批發主檔</td><td><code>麗嬰採購產品總表.xlsm</code></td></tr>
+          <tr><td>蝦皮</td><td>賣場商品列表</td><td><code>蝦皮賣場商品列表.xlsm</code></td></tr>
+          <tr><td>內部商品列表</td><td>自家 SKU 清單</td><td><code>商品列表.xlsx</code></td></tr>
+          <tr><td>統整表</td><td>三表交叉後的價格與 SKU</td><td><code>商品蝦皮麗嬰價格統整表.xlsx</code></td></tr>
+          <tr><td>Sitegiant</td><td>電商入庫／批量編輯</td><td><code>batch_edit_*.xlsx</code> 與入庫單</td></tr>
+        </tbody>
+      </table>
+      <h3>對鍵</h3>
+      <ul>
+        <li>內部 <code>自定義編碼</code> = 蝦皮 <code>iSKU</code></li>
+        <li>內部 <code>c</code> = 麗嬰 <code>條碼</code> = Sitegiant 國際條碼（UPC）</li>
+        <li>入庫單的「庫存貨品名稱」來自統整表 <code>sitegiant庫存SKU</code>，不是蝦皮商品名稱</li>
+      </ul>
+      <h2>如何打開</h2>
+      <ol>
+        <li>用平常的網址打開 Streamlit 畫面（本機通常是 <code>http://localhost:8501</code>）。</li>
+        <li>左側選模組，再選子頁。</li>
+        <li>頁面上方的「目前導覽路徑」可確認你在哪一頁。</li>
+      </ol>
+      <div class="callout warn">
+        <strong>權限</strong>
+        若整頁出現「憑證缺失／無效」或無法列出雲端檔，請找工程師檢查 Secrets 與 Drive 權限。
+      </div>
+      <h2>建議每日順序</h2>
+      <div class="flow">
+        <span>雲端狀態</span><span class="arrow">→</span>
+        <span>蝦皮 iSKU</span><span class="arrow">→</span>
+        <span>三表整合</span><span class="arrow">→</span>
+        <span>入庫轉換</span>
+      </div>
+      <ol>
+        <li><strong>各表最新修改時間</strong> — 確認今日來源檔已上傳。</li>
+        <li><strong>蝦皮商品清單轉換</strong> — 校正最新 mass_update（台北 10:00 後若尚未匯入會自動跑一次）。</li>
+        <li><strong>PowerQuery 執行三表整合</strong> — 重算統整表並回寫雲端。</li>
+        <li>依需要：入庫轉換或批量新增 UPC。</li>
+        <li>有新麗嬰採購單：先合併審核，再跑三表整合。</li>
+      </ol>
+      <h2>依畫面標題</h2>
+      <h3>雲端資料狀態</h3>
+      <ul><li><a href="pages/01-cloud-status.html">各表最新修改時間</a></li></ul>
+      <h3>Sitegiant 電商整合管理</h3>
+      <ul>
+        <li><a href="pages/02-sitegiant-inward.html">Sitegiant 採購入庫單格式轉換</a></li>
+        <li><a href="pages/03-sitegiant-history.html">Sitegiant 歷史入庫單紀錄</a></li>
+        <li><a href="pages/04-sitegiant-upc.html">Sitegiant 批量新增UPC</a></li>
+        <li><a href="pages/05-pending-po.html">採購單待處理</a></li>
+      </ul>
+      <h3>商品蝦皮麗嬰統整管理</h3>
+      <ul>
+        <li><a href="pages/06-powerquery.html">PowerQuery 執行三表整合</a></li>
+        <li><a href="pages/07-liying-merge.html">麗嬰商品表合併和與審核</a></li>
+        <li><a href="pages/08-shopee-convert.html">蝦皮商品清單轉換</a></li>
+        <li><a href="pages/09-powerquery-history.html">PowerQuery 三表整合歷史紀錄</a></li>
+        <li><a href="pages/10-product-query.html">商品清單紀錄查詢</a></li>
+        <li><a href="pages/11-liying-query.html">麗嬰商品總表數據查詢</a></li>
+      </ul>
+      <nav class="pager">
+        <a href="../index.html">手冊首頁</a>
+        <a href="pages/01-cloud-status.html">下一頁：各表最新修改時間</a>
+      </nav>
+    </main>
+  </div>
+</body>
+</html>

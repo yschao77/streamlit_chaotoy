@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>蝦皮商品清單轉換</title>
+  <link rel="stylesheet" href="../../assets/manual.css">
+</head>
+<body>
+  <header class="topbar">
+    <a href="../../index.html">手冊首頁</a>
+    <span class="sep">/</span>
+    <a href="../index.html">使用者手冊</a>
+  </header>
+  <div class="layout">
+    <nav class="sidebar">
+      <h2>使用者手冊</h2>
+      <a href="../index.html">總覽</a>
+      <a href="01-cloud-status.html">各表最新修改時間</a>
+      <a href="02-sitegiant-inward.html">Sitegiant 採購入庫單格式轉換</a>
+      <a href="03-sitegiant-history.html">Sitegiant 歷史入庫單紀錄</a>
+      <a href="04-sitegiant-upc.html">Sitegiant 批量新增UPC</a>
+      <a href="05-pending-po.html">採購單待處理</a>
+      <a href="06-powerquery.html">PowerQuery 執行三表整合</a>
+      <a href="07-liying-merge.html">麗嬰商品表合併和與審核</a>
+      <a class="current" href="08-shopee-convert.html">蝦皮商品清單轉換</a>
+      <a href="09-powerquery-history.html">PowerQuery 三表整合歷史紀錄</a>
+      <a href="10-product-query.html">商品清單紀錄查詢</a>
+      <a href="11-liying-query.html">麗嬰商品總表數據查詢</a>
+    </nav>
+    <main>
+      <nav class="crumb">使用者手冊 ➔ 蝦皮商品清單轉換</nav>
+      <h1>蝦皮商品清單轉換</h1>
+      <aside class="bullets">
+        <h2>本頁重點</h2>
+        <ul>
+          <li>從雲端抓最新 <code>mass_update_sales_info_3062950_YYYYMMDD*.xlsx</code>，校正 iSKU 後覆寫蝦皮主表。</li>
+          <li>同一檔 md5 已匯入會略過。</li>
+          <li>台北時間 10:00 後若今天還沒匯入，打開本頁會自動校正一次。</li>
+        </ul>
+      </aside>
+      <h2>何時使用</h2>
+      <p>蝦皮後台匯出最新「價格及庫存」mass_update 並放到對應 Drive 資料夾之後。</p>
+      <h2>操作步驟</h2>
+      <ol>
+        <li>確認頁面顯示將處理的最新來源檔與時間。</li>
+        <li>按 <strong>立即校正（抓取雲端最新 mass_update）</strong>。</li>
+        <li>成功後可預覽並下載校正結果。</li>
+      </ol>
+      <p>備用：展開「手動上傳原始報表」（同樣走 md5 去重）。</p>
+      <h2>iSKU 怎麼來</h2>
+      <ul>
+        <li>優先用「商品選項貨號」，否則用「主商品貨號」。</li>
+        <li>兩者都空則標「蝦皮無 iSKU」並排除。</li>
+        <li>同一 iSKU 留價格較後的一筆；有效 GTIN 再依 GTIN 去重。</li>
+      </ul>
+      <p>結果寫入 <code>蝦皮賣場商品列表.xlsm</code> 的「蝦皮商品列表」，並在「匯入檔案」記檔名、md5、時間。</p>
+      <div class="callout info">其他蝦皮資料夾（媒體、標題描述、配送、未上架）只在狀態頁監看，本頁不會讀。</div>
+      <h2>常見問題</h2>
+      <ul>
+        <li><strong>找不到 mass_update 檔</strong>：檔名或日期不對，或檔還沒上傳。</li>
+        <li><strong>md5 重複</strong>：同一份不會再覆寫；要重跑請換新匯出檔。</li>
+        <li><strong>自動校正沒發生</strong>：尚未到台北 10:00，或今天已有匯入紀錄。</li>
+      </ul>
+      <nav class="pager">
+        <a href="07-liying-merge.html">上一頁：麗嬰商品表合併和與審核</a>
+        <a href="09-powerquery-history.html">下一頁：三表整合歷史紀錄</a>
+      </nav>
+    </main>
+  </div>
+</body>
+</html>

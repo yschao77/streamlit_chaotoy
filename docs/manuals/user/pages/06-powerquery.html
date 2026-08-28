@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PowerQuery 執行三表整合</title>
+  <link rel="stylesheet" href="../../assets/manual.css">
+</head>
+<body>
+  <header class="topbar">
+    <a href="../../index.html">手冊首頁</a>
+    <span class="sep">/</span>
+    <a href="../index.html">使用者手冊</a>
+  </header>
+  <div class="layout">
+    <nav class="sidebar">
+      <h2>使用者手冊</h2>
+      <a href="../index.html">總覽</a>
+      <a href="01-cloud-status.html">各表最新修改時間</a>
+      <a href="02-sitegiant-inward.html">Sitegiant 採購入庫單格式轉換</a>
+      <a href="03-sitegiant-history.html">Sitegiant 歷史入庫單紀錄</a>
+      <a href="04-sitegiant-upc.html">Sitegiant 批量新增UPC</a>
+      <a href="05-pending-po.html">採購單待處理</a>
+      <a class="current" href="06-powerquery.html">PowerQuery 執行三表整合</a>
+      <a href="07-liying-merge.html">麗嬰商品表合併和與審核</a>
+      <a href="08-shopee-convert.html">蝦皮商品清單轉換</a>
+      <a href="09-powerquery-history.html">PowerQuery 三表整合歷史紀錄</a>
+      <a href="10-product-query.html">商品清單紀錄查詢</a>
+      <a href="11-liying-query.html">麗嬰商品總表數據查詢</a>
+    </nav>
+    <main>
+      <nav class="crumb">使用者手冊 ➔ PowerQuery 執行三表整合</nav>
+      <h1>PowerQuery 執行三表整合</h1>
+      <aside class="bullets">
+        <h2>本頁重點</h2>
+        <ul>
+          <li>把內部商品列表、蝦皮主表、麗嬰總表交叉成價格統整表。</li>
+          <li>用最新 Sitegiant <code>batch_edit_basic_info_all_*.xlsx</code> 填 <code>sitegiant庫存SKU</code>。</li>
+          <li>預覽確認後再回寫，才會覆寫雲端統整表。</li>
+        </ul>
+      </aside>
+      <h2>何時使用</h2>
+      <p>蝦皮或麗嬰有更新、要做入庫之前、或要重算八折／未稅／稅款。</p>
+      <h2>操作步驟</h2>
+      <ol>
+        <li>看三個指標是否「已對接」，以及最後修改時間。</li>
+        <li>確認雲端已有 <code>商品蝦皮麗嬰價格統整表</code>。</li>
+        <li>確認有最新 <code>batch_edit_basic_info_all_DD-MM-YYYY-*.xlsx</code>。</li>
+        <li>按 <strong>啟動三表整合與財務指標計算</strong>。</li>
+        <li>預覽列數與來源檔名。</li>
+        <li>可先下載本機 Excel；確認後按 <strong>將整合結果回寫並更新至雲端</strong>。</li>
+      </ol>
+      <h2>系統會算什麼</h2>
+      <p>對鍵：<code>自定義編碼</code> = 蝦皮 <code>iSKU</code>；內部 <code>c</code> = 麗嬰 <code>條碼</code>；<code>c</code> = batch_edit UPC。</p>
+      <table>
+        <thead><tr><th>欄位</th><th>說明</th></tr></thead>
+        <tbody>
+          <tr><td>麗嬰零售八折</td><td>麗嬰零售價 × 0.8</td></tr>
+          <tr><td>麗嬰八折比蝦皮貴</td><td>八折高於蝦皮售價則標記</td></tr>
+          <tr><td>麗嬰未稅價</td><td>批發含稅價 ÷ 1.05</td></tr>
+          <tr><td>麗嬰稅款</td><td>含稅 − 未稅</td></tr>
+          <tr><td>sitegiant庫存SKU</td><td>batch_edit 的庫存貨品名稱</td></tr>
+        </tbody>
+      </table>
+      <h2>預期檔案</h2>
+      <ul>
+        <li>讀：商品列表、蝦皮主表、麗嬰總表、Sitegiant BasicInfo</li>
+        <li>寫：覆寫既有 <code>商品蝦皮麗嬰價格統整表.xlsx</code>（雲端必須先有這份主檔）</li>
+      </ul>
+      <h2>常見問題</h2>
+      <ul>
+        <li><strong>缺少核心資料主檔案 ID</strong>：三個主檔有缺，先看雲端狀態頁。</li>
+        <li><strong>雲端不存在統整表空白主表</strong>：不能新建；請先在 Drive 放好主檔。</li>
+        <li><strong>sitegiant庫存SKU 全空</strong>：BasicInfo 檔名不對或資料夾沒檔。</li>
+      </ul>
+      <nav class="pager">
+        <a href="05-pending-po.html">上一頁：採購單待處理</a>
+        <a href="07-liying-merge.html">下一頁：麗嬰商品表合併和與審核</a>
+      </nav>
+    </main>
+  </div>
+</body>
+</html>

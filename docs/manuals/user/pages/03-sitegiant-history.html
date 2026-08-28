@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sitegiant 歷史入庫單紀錄</title>
+  <link rel="stylesheet" href="../../assets/manual.css">
+</head>
+<body>
+  <header class="topbar">
+    <a href="../../index.html">手冊首頁</a>
+    <span class="sep">/</span>
+    <a href="../index.html">使用者手冊</a>
+  </header>
+  <div class="layout">
+    <nav class="sidebar">
+      <h2>使用者手冊</h2>
+      <a href="../index.html">總覽</a>
+      <a href="01-cloud-status.html">各表最新修改時間</a>
+      <a href="02-sitegiant-inward.html">Sitegiant 採購入庫單格式轉換</a>
+      <a class="current" href="03-sitegiant-history.html">Sitegiant 歷史入庫單紀錄</a>
+      <a href="04-sitegiant-upc.html">Sitegiant 批量新增UPC</a>
+      <a href="05-pending-po.html">採購單待處理</a>
+      <a href="06-powerquery.html">PowerQuery 執行三表整合</a>
+      <a href="07-liying-merge.html">麗嬰商品表合併和與審核</a>
+      <a href="08-shopee-convert.html">蝦皮商品清單轉換</a>
+      <a href="09-powerquery-history.html">PowerQuery 三表整合歷史紀錄</a>
+      <a href="10-product-query.html">商品清單紀錄查詢</a>
+      <a href="11-liying-query.html">麗嬰商品總表數據查詢</a>
+    </nav>
+    <main>
+      <nav class="crumb">使用者手冊 ➔ Sitegiant 歷史入庫單紀錄</nav>
+      <h1>Sitegiant 歷史入庫單紀錄</h1>
+      <aside class="bullets">
+        <h2>本頁重點</h2>
+        <ul>
+          <li>用統整表 <code>c</code> → <code>sitegiant庫存SKU</code> 更新「庫存貨品名稱」。</li>
+          <li>雲端已有同檔名才覆寫；沒有同名檔只給本機下載，不會新建。</li>
+          <li>可調閱單張歷史單並看成本、稅款加總。</li>
+        </ul>
+      </aside>
+      <h2>何時使用</h2>
+      <p>舊入庫單名稱不對、或要把本機入庫 Excel 對回最新統整表。</p>
+      <h2>操作步驟</h2>
+      <h3>批次匯入歷史入庫單</h3>
+      <ol>
+        <li>上傳一或多個 <code>.xlsx</code> / <code>.xls</code>。</li>
+        <li>按 <strong>依統整表更新庫存貨品名稱並匯入</strong>。</li>
+        <li>看每檔結果：已覆寫、僅下載、找不到對應、SKU 空白。</li>
+        <li>需要時下載更正後檔案。</li>
+      </ol>
+      <h3>批次修正雲端既有單據</h3>
+      <ol>
+        <li>多選雲端已有的歷史入庫單（預設全選）。</li>
+        <li>按 <strong>依統整表更新所選單據的庫存貨品名稱</strong>。</li>
+        <li>確認覆寫筆數與找不到的條碼。</li>
+      </ol>
+      <h3>調閱與加總</h3>
+      <ol>
+        <li>選一張入庫對帳單。</li>
+        <li>看明細；下方顯示「成本 × 數量」「稅款 × 數量」總額。</li>
+        <li>可下載該檔。</li>
+      </ol>
+      <h2>預期檔案</h2>
+      <ul>
+        <li>讀：<code>商品蝦皮麗嬰價格統整表.xlsx</code>（沒有主檔時用後備統整表）</li>
+        <li>讀寫：歷史入庫資料夾既有 <code>.xlsx</code></li>
+      </ul>
+      <h2>常見問題</h2>
+      <ul>
+        <li><strong>雲端沒有同名檔，未寫入</strong>：系統不新建 Drive 檔；請先手動建立同名檔，或只下載本機檔。</li>
+        <li><strong>找不到統整表對應</strong>：條碼不在統整表 <code>c</code>。</li>
+        <li><strong>sitegiant庫存SKU 空白</strong>：先跑三表整合，並確認 BasicInfo 檔存在。</li>
+        <li><strong>憑證缺失／無效</strong>：找工程師，不要貼金鑰。</li>
+      </ul>
+      <nav class="pager">
+        <a href="02-sitegiant-inward.html">上一頁：採購入庫單格式轉換</a>
+        <a href="04-sitegiant-upc.html">下一頁：批量新增UPC</a>
+      </nav>
+    </main>
+  </div>
+</body>
+</html>

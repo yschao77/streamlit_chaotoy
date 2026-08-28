@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>開發慣例與故障排除</title>
+  <link rel="stylesheet" href="../../assets/manual.css">
+</head>
+<body>
+  <header class="topbar">
+    <a href="../../index.html">手冊首頁</a>
+    <span class="sep">/</span>
+    <a href="../index.html">工程師手冊</a>
+  </header>
+  <div class="layout">
+    <nav class="sidebar">
+      <h2>工程師手冊</h2>
+      <a href="../index.html">總覽</a>
+      <a href="01-architecture.html">架構與資料流</a>
+      <a href="02-setup.html">本機啟動與憑證</a>
+      <a href="03-file-roles.html">檔案職責</a>
+      <a href="04-gdrive-excel.html">Google Drive 與 Excel</a>
+      <a href="05-ci-sync.html">定時同步</a>
+      <a class="current" href="06-conventions-troubleshooting.html">開發慣例與故障排除</a>
+    </nav>
+    <main>
+      <nav class="crumb">工程師手冊 ➔ 開發慣例與故障排除</nav>
+      <h1>開發慣例與故障排除</h1>
+      <aside class="bullets">
+        <h2>本頁重點</h2>
+        <ul>
+          <li>共用邏輯只改 <code>utils.py</code>；頁面不要重寫 <code>clean_barcode</code>。</li>
+          <li>Drive service 用 <code>@st.cache_resource</code>；檔案／主表 <code>@st.cache_data(ttl=600)</code>。寫入後要清 cache。</li>
+          <li>憑證錯誤維持「憑證缺失／無效」，不要把例外全文（可能含金鑰）丟到畫面。</li>
+        </ul>
+      </aside>
+      <h2>慣例</h2>
+      <pre><code>from utils import clean_barcode
+df["條碼"] = df["條碼"].map(clean_barcode)</code></pre>
+      <ul>
+        <li>使用者看得到的失敗用 <code>st.error</code>；不要空的 <code>except: pass</code></li>
+        <li>Drive 連線失敗可 <code>st.stop()</code></li>
+        <li><code>views/</code> 既有 sys.path 補丁可保留，新檔不要再複製一份</li>
+      </ul>
+      <h2>快取</h2>
+      <p>寫雲端成功後常見要清：<code>load_master_data</code>、<code>load_shopee_data</code>、<code>get_cached_gdrive_id</code>、<code>get_cached_gdrive_file_bytes</code>、狀態頁 <code>_cached_status</code>。</p>
+      <h2>故障排除</h2>
+      <table>
+        <thead><tr><th>現象</th><th>先查</th></tr></thead>
+        <tbody>
+          <tr><td>憑證缺失／無效</td><td>Secrets 或 Actions Secret 是否有效</td></tr>
+          <tr><td>files.list 空</td><td>service account 沒被加進該資料夾</td></tr>
+          <tr><td>找不到 mass_update / batch_edit</td><td>檔名日期格式與 kind</td></tr>
+          <tr><td>統整表無法回寫</td><td>雲端沒有既有主檔；API 不新建</td></tr>
+          <tr><td>歷史入庫只下載</td><td>沒有同名檔</td></tr>
+          <tr><td>UPC 填補 0 筆</td><td>蝦皮列表空或 SKU 對不上 GTIN</td></tr>
+          <tr><td>重複匯入被拒</td><td>md5 已在匯入紀錄</td></tr>
+          <tr><td>條碼對不上</td><td>未經 clean_barcode；科學記號</td></tr>
+          <tr><td>畫面資料過期</td><td>寫入後沒清 cache</td></tr>
+        </tbody>
+      </table>
+      <p>監看用的蝦皮資料夾沒接流程是正常的。</p>
+      <nav class="pager">
+        <a href="05-ci-sync.html">上一頁：定時同步</a>
+        <a href="../index.html">回到工程師總覽</a>
+      </nav>
+    </main>
+  </div>
+</body>
+</html>

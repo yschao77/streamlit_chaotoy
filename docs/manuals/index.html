@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>手冊總覽 — 麗嬰與蝦皮商務數據情報中心</title>
+  <link rel="stylesheet" href="assets/manual.css">
+</head>
+<body>
+  <header class="topbar">
+    <strong>進銷存中央管理系統</strong>
+    <span class="sep">/</span>
+    <span>手冊總覽</span>
+  </header>
+  <div class="layout">
+    <nav class="sidebar">
+      <h2>手冊</h2>
+      <a class="current" href="index.html">總覽</a>
+      <a href="user/index.html">使用者手冊</a>
+      <a href="engineer/index.html">工程師手冊</a>
+    </nav>
+    <main>
+      <nav class="crumb">手冊首頁</nav>
+      <h1>麗嬰與蝦皮商務數據情報中心</h1>
+      <aside class="bullets">
+        <h2>本頁重點</h2>
+        <ul>
+          <li>使用者：依側邊欄標題操作各頁。</li>
+          <li>工程師：啟動、憑證、Drive 讀寫與定時同步。</li>
+          <li>兩種格式：Markdown（GitHub）與 HTML（本機瀏覽器）。</li>
+        </ul>
+      </aside>
+      <p>這套 Streamlit 工具用來處理進銷存資料。真正的資料在 <strong>Google Drive 的 Excel / xlsm</strong>，沒有本機資料庫。</p>
+      <p>請依角色打開對應手冊。每一本都有「總覽」和「依畫面標題分頁」。</p>
+      <div class="cards">
+        <a class="card" href="user/index.html">
+          <h3>使用者手冊</h3>
+          <p>日常操作、匯入、查詢、入庫與各畫面步驟。</p>
+        </a>
+        <a class="card" href="engineer/index.html">
+          <h3>工程師手冊</h3>
+          <p>本機啟動、架構、Drive／Excel 規則、定時同步。</p>
+        </a>
+      </div>
+      <h2>系統是什麼</h2>
+      <ol>
+        <li><strong>雲端資料狀態</strong>：看各 Drive 來源最新檔時間。</li>
+        <li><strong>Sitegiant 電商整合管理</strong>：採購入庫轉換、歷史入庫、批量 UPC、待處理清單。</li>
+        <li><strong>商品蝦皮麗嬰統整管理</strong>：麗嬰採購單合併審核、蝦皮 iSKU 校正、三表整合與查詢。</li>
+      </ol>
+      <h2>常用詞</h2>
+      <ul>
+        <li><strong>麗嬰</strong>：採購／批發主檔（<code>麗嬰採購產品總表.xlsm</code>）。</li>
+        <li><strong>蝦皮</strong>：賣場商品列表（<code>蝦皮賣場商品列表.xlsm</code>）。</li>
+        <li><strong>Sitegiant</strong>：電商入庫與批量編輯檔格式。</li>
+        <li><strong>三表整合</strong>：內部商品列表 × 蝦皮 × 麗嬰 → <code>商品蝦皮麗嬰價格統整表</code>。</li>
+      </ul>
+      <h2>如何打開 HTML</h2>
+      <p>在檔案總管進入 <code>docs/manuals/</code>，雙擊 <code>index.html</code>。相對連結即可在離線環境翻頁。</p>
+    </main>
+  </div>
+</body>
+</html>

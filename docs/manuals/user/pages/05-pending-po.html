@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>採購單待處理</title>
+  <link rel="stylesheet" href="../../assets/manual.css">
+</head>
+<body>
+  <header class="topbar">
+    <a href="../../index.html">手冊首頁</a>
+    <span class="sep">/</span>
+    <a href="../index.html">使用者手冊</a>
+  </header>
+  <div class="layout">
+    <nav class="sidebar">
+      <h2>使用者手冊</h2>
+      <a href="../index.html">總覽</a>
+      <a href="01-cloud-status.html">各表最新修改時間</a>
+      <a href="02-sitegiant-inward.html">Sitegiant 採購入庫單格式轉換</a>
+      <a href="03-sitegiant-history.html">Sitegiant 歷史入庫單紀錄</a>
+      <a href="04-sitegiant-upc.html">Sitegiant 批量新增UPC</a>
+      <a class="current" href="05-pending-po.html">採購單待處理</a>
+      <a href="06-powerquery.html">PowerQuery 執行三表整合</a>
+      <a href="07-liying-merge.html">麗嬰商品表合併和與審核</a>
+      <a href="08-shopee-convert.html">蝦皮商品清單轉換</a>
+      <a href="09-powerquery-history.html">PowerQuery 三表整合歷史紀錄</a>
+      <a href="10-product-query.html">商品清單紀錄查詢</a>
+      <a href="11-liying-query.html">麗嬰商品總表數據查詢</a>
+    </nav>
+    <main>
+      <nav class="crumb">使用者手冊 ➔ 採購單待處理</nav>
+      <h1>採購單待處理</h1>
+      <aside class="bullets">
+        <h2>本頁重點</h2>
+        <ul>
+          <li>顯示入庫轉換時對不到統整表的異常商品。</li>
+          <li>本頁以查看、下載為主；清單會在入庫轉換時自動新增或清掉。</li>
+          <li>狀況通常是「須建立自定義編碼」或「須建立賣場商品」。</li>
+        </ul>
+      </aside>
+      <h2>何時使用</h2>
+      <p>入庫轉換出現警告之後，或要清積壓的缺料／缺 SKU。</p>
+      <h2>操作步驟</h2>
+      <ol>
+        <li>打開本頁，等待雲端清單載入。</li>
+        <li>沒有資料即表示目前沒有待處理。</li>
+        <li>有資料時看：採購單檔名、國際條碼、狀況、狀態、建立時間。</li>
+        <li>需要時下載 Excel。</li>
+        <li>按 <strong>重新載入最新雲端資料</strong> 可清快取再讀。</li>
+      </ol>
+      <h3>處理方式</h3>
+      <ul>
+        <li><strong>須建立自定義編碼</strong>：在內部商品列表補 SKU，再跑三表整合，然後重做入庫。</li>
+        <li><strong>須建立賣場商品</strong>：補 <code>sitegiant庫存SKU</code> 後再轉換。</li>
+        <li>若在待處理檔把「狀態」改成不是「待處理」，下次入庫轉換會把它移除。</li>
+      </ul>
+      <h2>預期檔案</h2>
+      <p>雲端「尚未建立商品清單」試算表（由入庫轉換維護）。</p>
+      <h2>常見問題</h2>
+      <ul>
+        <li><strong>讀取雲端清單失敗</strong>：檔案尚未建立，或沒有權限。第一次成功跑入庫轉換後通常會出現。</li>
+        <li><strong>清單有舊資料</strong>：用同一批條碼再轉一次（已對得上會自動清）。</li>
+      </ul>
+      <nav class="pager">
+        <a href="04-sitegiant-upc.html">上一頁：批量新增UPC</a>
+        <a href="06-powerquery.html">下一頁：PowerQuery 執行三表整合</a>
+      </nav>
+    </main>
+  </div>
+</body>
+</html>

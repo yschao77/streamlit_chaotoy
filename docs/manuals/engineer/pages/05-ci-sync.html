@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>定時同步</title>
+  <link rel="stylesheet" href="../../assets/manual.css">
+</head>
+<body>
+  <header class="topbar">
+    <a href="../../index.html">手冊首頁</a>
+    <span class="sep">/</span>
+    <a href="../index.html">工程師手冊</a>
+  </header>
+  <div class="layout">
+    <nav class="sidebar">
+      <h2>工程師手冊</h2>
+      <a href="../index.html">總覽</a>
+      <a href="01-architecture.html">架構與資料流</a>
+      <a href="02-setup.html">本機啟動與憑證</a>
+      <a href="03-file-roles.html">檔案職責</a>
+      <a href="04-gdrive-excel.html">Google Drive 與 Excel</a>
+      <a class="current" href="05-ci-sync.html">定時同步</a>
+      <a href="06-conventions-troubleshooting.html">開發慣例與故障排除</a>
+    </nav>
+    <main>
+      <nav class="crumb">工程師手冊 ➔ 定時同步</nav>
+      <h1>定時同步</h1>
+      <aside class="bullets">
+        <h2>本頁重點</h2>
+        <ul>
+          <li>Workflow：<code>.github/workflows/sync-shopee.yml</code></li>
+          <li>排程：cron <code>0 2 * * *</code>（UTC 02:00，約台北 10:00），也可手動觸發</li>
+          <li>憑證用 repo Secret 注入環境變數，不要把 JSON 寫死在 YAML</li>
+        </ul>
+      </aside>
+      <h2>步驟順序</h2>
+      <p>前三步 <code>continue-on-error: true</code>；最後狀態報告 <code>if: always()</code>。</p>
+      <ol>
+        <li><code>scripts/sync_shopee_from_gdrive.py</code> — 最新 mass_update → iSKU → 覆寫蝦皮主表。md5 重複則略過。</li>
+        <li><code>scripts/sync_price_summary.py</code> — 三表 + BasicInfo → 覆寫統整表。雲端必須已有主檔。</li>
+        <li><code>scripts/sync_sitegiant_upc.py</code> — 填空白 UPC → <code>batch_edit_upc_added_only.xlsx</code>。</li>
+        <li><code>scripts/report_gdrive_status.py</code> — 最新檔與台北時間，寫入 Actions Summary。</li>
+      </ol>
+      <p>本機可跑同一支 script，需先設 <code>GOOGLE_SERVICE_ACCOUNT_JSON</code>。</p>
+      <h2>可選郵件</h2>
+      <p>同時有 <code>STATUS_MAIL_TO</code> 與 <code>SMTP_HOST</code> 才寄信。沒有這些 Secret 時不會寄信。</p>
+      <h2>失敗時</h2>
+      <p>個別 sync 失敗不會擋住狀態報告。看 Actions log 的退出原因，不要把憑證貼進 issue。</p>
+      <nav class="pager">
+        <a href="04-gdrive-excel.html">上一頁：Google Drive 與 Excel</a>
+        <a href="06-conventions-troubleshooting.html">下一頁：開發慣例與故障排除</a>
+      </nav>
+    </main>
+  </div>
+</body>
+</html>

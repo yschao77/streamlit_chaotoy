@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>麗嬰商品總表數據查詢</title>
+  <link rel="stylesheet" href="../../assets/manual.css">
+</head>
+<body>
+  <header class="topbar">
+    <a href="../../index.html">手冊首頁</a>
+    <span class="sep">/</span>
+    <a href="../index.html">使用者手冊</a>
+  </header>
+  <div class="layout">
+    <nav class="sidebar">
+      <h2>使用者手冊</h2>
+      <a href="../index.html">總覽</a>
+      <a href="01-cloud-status.html">各表最新修改時間</a>
+      <a href="02-sitegiant-inward.html">Sitegiant 採購入庫單格式轉換</a>
+      <a href="03-sitegiant-history.html">Sitegiant 歷史入庫單紀錄</a>
+      <a href="04-sitegiant-upc.html">Sitegiant 批量新增UPC</a>
+      <a href="05-pending-po.html">採購單待處理</a>
+      <a href="06-powerquery.html">PowerQuery 執行三表整合</a>
+      <a href="07-liying-merge.html">麗嬰商品表合併和與審核</a>
+      <a href="08-shopee-convert.html">蝦皮商品清單轉換</a>
+      <a href="09-powerquery-history.html">PowerQuery 三表整合歷史紀錄</a>
+      <a href="10-product-query.html">商品清單紀錄查詢</a>
+      <a class="current" href="11-liying-query.html">麗嬰商品總表數據查詢</a>
+    </nav>
+    <main>
+      <nav class="crumb">使用者手冊 ➔ 麗嬰商品總表數據查詢</nav>
+      <h1>麗嬰商品總表數據查詢</h1>
+      <aside class="bullets">
+        <h2>本頁重點</h2>
+        <ul>
+          <li>讀 <code>麗嬰採購產品總表.xlsm</code> 各工作表（不含「麗嬰產品新採購單」）。</li>
+          <li>三種查法：多筆條碼、多筆庫存 SKU、模糊關鍵字。</li>
+          <li>此頁不寫回總表。</li>
+        </ul>
+      </aside>
+      <h2>何時使用</h2>
+      <p>查零售價、含稅、品名，或核對一批條碼／貨號。</p>
+      <h2>操作步驟</h2>
+      <ol>
+        <li>選數據分頁（例如 <code>麗嬰國際產品總表</code>、<code>已處理採購單</code>、<code>刪除紀錄</code>）。</li>
+        <li>選查詢模式。</li>
+      </ol>
+      <h3>多筆條碼價格查詢</h3>
+      <p>貼國際條碼（換行、空格或逗號）。結果優先顯示條碼、名稱、零售價、含稅，可下載。該分頁沒有「條碼」欄會提示無法查。</p>
+      <h3>多筆庫存 SKU 查詢</h3>
+      <p>系統依序找欄名：庫存SKU、自定義編碼、商品編號、貨號。貼多筆後篩選並可下載。</p>
+      <h3>模糊關鍵字搜尋</h3>
+      <p>輸入關鍵字，對整張表做不分大小寫包含比對。空白則顯示全表。</p>
+      <h2>預期檔案</h2>
+      <p>只讀：<code>麗嬰採購產品總表.xlsm</code></p>
+      <h2>常見問題</h2>
+      <ul>
+        <li><strong>讀取分頁失敗</strong>：檔被佔用、工作表名稱變了，或憑證／權限問題。</li>
+        <li><strong>找不到 SKU 欄</strong>：該分頁沒有上述欄名，改用關鍵字或換分頁。</li>
+        <li>要改總表請用「麗嬰商品表合併和與審核」。</li>
+      </ul>
+      <nav class="pager">
+        <a href="10-product-query.html">上一頁：商品清單紀錄查詢</a>
+        <a href="../index.html">回到使用者總覽</a>
+      </nav>
+    </main>
+  </div>
+</body>
+</html>

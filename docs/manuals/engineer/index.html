@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>工程師手冊總覽</title>
+  <link rel="stylesheet" href="../assets/manual.css">
+</head>
+<body>
+  <header class="topbar">
+    <a href="../index.html">手冊首頁</a>
+    <span class="sep">/</span>
+    <strong>工程師手冊</strong>
+  </header>
+  <div class="layout">
+    <nav class="sidebar">
+      <h2>工程師手冊</h2>
+      <a class="current" href="index.html">總覽</a>
+      <a href="pages/01-architecture.html">架構與資料流</a>
+      <a href="pages/02-setup.html">本機啟動與憑證</a>
+      <a href="pages/03-file-roles.html">檔案職責</a>
+      <a href="pages/04-gdrive-excel.html">Google Drive 與 Excel</a>
+      <a href="pages/05-ci-sync.html">定時同步</a>
+      <a href="pages/06-conventions-troubleshooting.html">開發慣例與故障排除</a>
+      <div class="group">
+        <h2>其他</h2>
+        <a href="../index.html">手冊首頁</a>
+        <a href="../user/index.html">使用者手冊</a>
+      </div>
+    </nav>
+    <main>
+      <nav class="crumb">工程師手冊</nav>
+      <h1>工程師手冊總覽</h1>
+      <aside class="bullets">
+        <h2>本頁重點</h2>
+        <ul>
+          <li><code>app.py</code> 只負責 page_config 與側邊欄路由；讀寫實作在 <code>utils.py</code>。</li>
+          <li>Streamlit 用 <code>st.secrets["textkey"]</code>；CLI／Actions 用 <code>GOOGLE_SERVICE_ACCOUNT_JSON</code>。</li>
+          <li>禁止 API 新建雲端檔（例外：<code>batch_edit_upc_added_only.xlsx</code>）。</li>
+        </ul>
+      </aside>
+      <p>資料在 Google Drive 的 Excel／xlsm，沒有本機資料庫。這是公開 GitHub repo：憑證與 private_key 不得進 git、issue 或畫面。</p>
+      <h2>架構</h2>
+      <pre><code>app.py          側邊欄：模組 → 子頁，組 gdrive_cfg
+views/          畫面 render；從 utils 呼叫
+utils.py        Drive I/O、TRACKED_SOURCES、條碼、主表／蝦皮寫入
+scripts/        與畫面同一套同步函式，給 CLI 與 GitHub Actions</code></pre>
+      <h3>對鍵</h3>
+      <ul>
+        <li>內部 <code>自定義編碼</code> ↔ 蝦皮 <code>iSKU</code></li>
+        <li>內部 <code>c</code> ↔ 麗嬰 <code>條碼</code> ↔ batch_edit UPC → 統整表 <code>sitegiant庫存SKU</code></li>
+      </ul>
+      <p>商業數字未要求不要改：稅率 <code>1.05</code>、零售八折 <code>0.8</code>、UID 後備 <code>3473</code>。</p>
+      <h2>本機最短路徑</h2>
+      <pre><code>pip install -r requirements.txt
+streamlit run app.py</code></pre>
+      <p>憑證：本機 <code>.streamlit/secrets.toml</code> 的 <code>textkey</code>。每個 Drive 資料夾要把 service account 的 <code>client_email</code> 加成檢視者或編輯者。</p>
+      <h2>依主題</h2>
+      <ul>
+        <li><a href="pages/01-architecture.html">架構與資料流</a></li>
+        <li><a href="pages/02-setup.html">本機啟動與憑證</a></li>
+        <li><a href="pages/03-file-roles.html">檔案職責</a></li>
+        <li><a href="pages/04-gdrive-excel.html">Google Drive 與 Excel</a></li>
+        <li><a href="pages/05-ci-sync.html">定時同步</a></li>
+        <li><a href="pages/06-conventions-troubleshooting.html">開發慣例與故障排除</a></li>
+      </ul>
+      <p>使用者畫面步驟見 <a href="../user/index.html">使用者手冊</a>。</p>
+      <nav class="pager">
+        <a href="../index.html">手冊首頁</a>
+        <a href="pages/01-architecture.html">下一頁：架構與資料流</a>
+      </nav>
+    </main>
+  </div>
+</body>
+</html>

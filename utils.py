@@ -1099,7 +1099,7 @@ def run_sitegiant_upc_sync():
         UPC_FILLED_FILENAME,
         _excel_bytes(filled),
         existing_file_id=existing["id"] if existing else None,
-        allow_create=True,
+        allow_create=False,
     )
     return {
         "ok": True,

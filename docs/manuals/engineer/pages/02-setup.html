@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>本機啟動與憑證</title>
+  <link rel="stylesheet" href="../../assets/manual.css">
+</head>
+<body>
+  <header class="topbar">
+    <a href="../../index.html">手冊首頁</a>
+    <span class="sep">/</span>
+    <a href="../index.html">工程師手冊</a>
+  </header>
+  <div class="layout">
+    <nav class="sidebar">
+      <h2>工程師手冊</h2>
+      <a href="../index.html">總覽</a>
+      <a href="01-architecture.html">架構與資料流</a>
+      <a class="current" href="02-setup.html">本機啟動與憑證</a>
+      <a href="03-file-roles.html">檔案職責</a>
+      <a href="04-gdrive-excel.html">Google Drive 與 Excel</a>
+      <a href="05-ci-sync.html">定時同步</a>
+      <a href="06-conventions-troubleshooting.html">開發慣例與故障排除</a>
+    </nav>
+    <main>
+      <nav class="crumb">工程師手冊 ➔ 本機啟動與憑證</nav>
+      <h1>本機啟動與憑證</h1>
+      <aside class="bullets">
+        <h2>本頁重點</h2>
+        <ul>
+          <li>Python 3.11、<code>requirements.txt</code>、<code>streamlit run app.py</code>。</li>
+          <li>本機 Secrets：<code>st.secrets["textkey"]</code>；不要印出、不要 commit。</li>
+          <li>CLI／Actions：環境變數 <code>GOOGLE_SERVICE_ACCOUNT_JSON</code>。</li>
+        </ul>
+      </aside>
+      <h2>啟動</h2>
+      <pre><code>pip install -r requirements.txt
+streamlit run app.py</code></pre>
+      <p>Dev Container 會在 8501 跑 Streamlit。不要無故加套件。</p>
+      <h2>憑證放哪裡</h2>
+      <table>
+        <thead><tr><th>環境</th><th>來源</th></tr></thead>
+        <tbody>
+          <tr><td>Streamlit 本機</td><td><code>.streamlit/secrets.toml</code> 的 <code>textkey</code></td></tr>
+          <tr><td>CLI / GitHub Actions</td><td><code>GOOGLE_SERVICE_ACCOUNT_JSON</code></td></tr>
+          <tr><td>備援</td><td><code>GOOGLE_APPLICATION_CREDENTIALS</code> 路徑</td></tr>
+        </tbody>
+      </table>
+      <div class="callout warn">
+        <strong>禁止</strong>
+        不要把 JSON 寫進 workflow、README 或手冊範例的真實內容；不要 print secrets；錯誤訊息用「憑證缺失／無效」。Drive 資料夾 ID 可以寫在程式；private_key 不行。
+      </div>
+      <h2>Drive 權限</h2>
+      <p>新資料夾必須把 service account 的 <code>client_email</code> 加成檢視者，否則 <code>files.list</code> 會是空的。需要寫回的資料夾要編輯者。</p>
+      <h2>本機不要提交的匯出檔</h2>
+      <p><code>.gitignore</code> 已排除 <code>batch_edit_basic_info_all_*.xlsx</code>、<code>mass_update_sales_info_*.xlsx</code> 等。不要 <code>git add -f</code>。</p>
+      <nav class="pager">
+        <a href="01-architecture.html">上一頁：架構與資料流</a>
+        <a href="03-file-roles.html">下一頁：檔案職責</a>
+      </nav>
+    </main>
+  </div>
+</body>
+</html>

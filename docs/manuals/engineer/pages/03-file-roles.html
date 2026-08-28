@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>檔案職責</title>
+  <link rel="stylesheet" href="../../assets/manual.css">
+</head>
+<body>
+  <header class="topbar">
+    <a href="../../index.html">手冊首頁</a>
+    <span class="sep">/</span>
+    <a href="../index.html">工程師手冊</a>
+  </header>
+  <div class="layout">
+    <nav class="sidebar">
+      <h2>工程師手冊</h2>
+      <a href="../index.html">總覽</a>
+      <a href="01-architecture.html">架構與資料流</a>
+      <a href="02-setup.html">本機啟動與憑證</a>
+      <a class="current" href="03-file-roles.html">檔案職責</a>
+      <a href="04-gdrive-excel.html">Google Drive 與 Excel</a>
+      <a href="05-ci-sync.html">定時同步</a>
+      <a href="06-conventions-troubleshooting.html">開發慣例與故障排除</a>
+    </nav>
+    <main>
+      <nav class="crumb">工程師手冊 ➔ 檔案職責</nav>
+      <h1>檔案職責</h1>
+      <aside class="bullets">
+        <h2>本頁重點</h2>
+        <ul>
+          <li>新邏輯放 <code>utils.py</code> 或 <code>views/</code>，不要再把整份 app 複製進 <code>temp/</code>。</li>
+          <li>共用函式只維護一份：頁面從 utils import。</li>
+          <li><code>save_to_master_xlsm</code> / <code>save_to_shopee_master_xlsm</code> 以 utils 簽名為準。</li>
+        </ul>
+      </aside>
+      <table>
+        <thead><tr><th>路徑</th><th>職責</th></tr></thead>
+        <tbody>
+          <tr><td><code>app.py</code></td><td>page_config、側邊欄路由、組 gdrive_cfg</td></tr>
+          <tr><td><code>utils.py</code></td><td>Drive I/O、TRACKED_SOURCES、清洗、主表讀寫、同步</td></tr>
+          <tr><td><code>views/status_page.py</code></td><td>各來源最新修改時間</td></tr>
+          <tr><td><code>views/sitegiant_page.py</code></td><td>入庫、歷史、UPC、待處理</td></tr>
+          <tr><td><code>views/integration_page.py</code></td><td>三表、麗嬰審核、蝦皮、查詢</td></tr>
+          <tr><td><code>scripts/</code></td><td>薄包裝，呼叫 utils 的 run_*_sync</td></tr>
+          <tr><td><code>temp/</code></td><td>舊快照，只讀</td></tr>
+        </tbody>
+      </table>
+      <div class="callout warn">
+        <strong>重複定義</strong>
+        <code>app.py</code> 仍有舊的 <code>save_to_master_xlsm</code>、<code>clean_barcode</code> 等。頁面實際 import 的是 utils。改行為時改 <code>utils.py</code>。
+      </div>
+      <h2>UI 慣例</h2>
+      <ul>
+        <li><code>st.set_page_config(..., layout="wide")</code> 只在 <code>app.py</code></li>
+        <li>UI 繁中 + 既有 emoji 標籤</li>
+        <li>主操作按鈕 <code>use_container_width=True</code></li>
+        <li>跨 rerun 資料放 <code>st.session_state</code>，key 保持穩定</li>
+      </ul>
+      <h2>不要改的數字（未要求時）</h2>
+      <p>稅率 <code>1.05</code>、零售八折 <code>0.8</code>、UID 後備 <code>3473</code>。</p>
+      <nav class="pager">
+        <a href="02-setup.html">上一頁：本機啟動與憑證</a>
+        <a href="04-gdrive-excel.html">下一頁：Google Drive 與 Excel</a>
+      </nav>
+    </main>
+  </div>
+</body>
+</html>
