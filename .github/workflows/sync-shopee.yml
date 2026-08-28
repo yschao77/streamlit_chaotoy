@@ -5,8 +5,9 @@ name: Sync Drive sources
 # external scheduler start a run when GitHub's own cron queue drops the schedule.
 on:
   schedule:
-    # 07:00 Taipei
-    - cron: "0 25 * * *"
+    # 09:15 Taipei. Cron is UTC only and the hour field must be 0-23,
+    # so Taipei time minus 8 hours: 09:15 -> 01:15 UTC.
+    - cron: "15 1 * * *"
   workflow_dispatch:
   repository_dispatch:
     types: [sync-drive]
@@ -54,10 +55,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          git init
-          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
-          git -c "http.extraheader=AUTHORIZATION: bearer ${GH_TOKEN}" fetch --depth 1 origin "${GITHUB_SHA}"
-          git checkout --force --detach FETCH_HEAD
+          set -euo pipefail
+          curl -sSL -H "Authorization: Bearer ${GH_TOKEN}" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/tarball/${GITHUB_SHA}" \
+            | tar xz --strip-components=1
+          test -f scripts/sync_shopee_from_gdrive.py
       - name: Install dependencies
         run: python3 -m pip install --user -r requirements.txt
       - name: Correct latest mass_update into Shopee master
