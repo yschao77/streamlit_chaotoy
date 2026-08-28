@@ -13,7 +13,7 @@
 | `app.py` | `page_config`、側邊欄路由、組 `gdrive_cfg` 傳子頁 |
 | `utils.py` | Drive I/O、`TRACKED_SOURCES`、條碼清洗、主表／蝦皮 xlsm 讀寫、三表／iSKU／UPC 同步 |
 | `views/status_page.py` | 各雲端來源最新修改時間 |
-| `views/sitegiant_page.py` | 入庫轉換、歷史入庫、批量 UPC、待處理 |
+| `views/sitegiant_page.py` | 入庫轉換、歷史入庫、查詢入庫、批量 UPC、待處理 |
 | `views/integration_page.py` | 三表整合、麗嬰合併審核、蝦皮轉換、查詢 |
 | `scripts/` | 薄包裝，呼叫 `utils` 的 `run_*_sync` |
 | `.github/workflows/sync-shopee.yml` | 每日排程跑 scripts |

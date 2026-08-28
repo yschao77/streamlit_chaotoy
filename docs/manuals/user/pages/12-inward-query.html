@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>查詢入庫紀錄</title>
+  <link rel="stylesheet" href="../../assets/manual.css">
+</head>
+<body>
+  <header class="topbar">
+    <a href="../../index.html">手冊首頁</a>
+    <span class="sep">/</span>
+    <a href="../index.html">使用者手冊</a>
+  </header>
+  <div class="layout">
+    <nav class="sidebar">
+      <h2>使用者手冊</h2>
+      <a href="../index.html">總覽</a>
+      <a href="01-cloud-status.html">各表最新修改時間</a>
+      <a href="02-sitegiant-inward.html">Sitegiant 採購入庫單格式轉換</a>
+      <a href="03-sitegiant-history.html">Sitegiant 歷史入庫單紀錄</a>
+      <a class="current" href="12-inward-query.html">查詢入庫紀錄</a>
+      <a href="04-sitegiant-upc.html">Sitegiant 批量新增UPC</a>
+      <a href="05-pending-po.html">採購單待處理</a>
+      <a href="06-powerquery.html">PowerQuery 執行三表整合</a>
+      <a href="07-liying-merge.html">麗嬰商品表合併和與審核</a>
+      <a href="08-shopee-convert.html">蝦皮商品清單轉換</a>
+      <a href="09-powerquery-history.html">PowerQuery 三表整合歷史紀錄</a>
+      <a href="10-product-query.html">商品清單紀錄查詢</a>
+      <a href="11-liying-query.html">麗嬰商品總表數據查詢</a>
+    </nav>
+    <main>
+      <nav class="crumb">使用者手冊 ➔ 查詢入庫紀錄</nav>
+      <h1>查詢入庫紀錄</h1>
+      <aside class="bullets">
+        <h2>本頁重點</h2>
+        <ul>
+          <li>用國際條碼或庫存 SKU，查出商品出現在哪幾張歷史入庫單。</li>
+          <li>結果含銷貨日期、進貨數量、資料夾（<code>YYYY/YYMM</code>）與檔名。</li>
+          <li>查詢先讀根目錄 <code>入庫明細索引.xlsx</code>；入庫單有增刪改才重掃並覆寫索引。</li>
+        </ul>
+      </aside>
+      <p>路徑：Sitegiant 電商整合管理 → 查詢入庫紀錄</p>
+      <h2>何時使用</h2>
+      <p>要知道某商品是哪天、哪張單、進了多少，而不想一張張打開入庫 Excel。</p>
+      <h2>操作步驟</h2>
+      <ol>
+        <li>打開本頁，等待索引載入（第一次或入庫單有變動時較久）。入庫單有新增後可按 <strong>重新載入索引</strong>。</li>
+        <li>選查詢欄位：<code>國際條碼</code> 或 <code>庫存SKU</code>。</li>
+        <li>貼多筆代碼（換行、逗號或空格皆可）。</li>
+        <li>看明細與進貨數量合計；同一商品多張單會全部列出（日期新→舊）。</li>
+        <li>需要時下載結果。</li>
+      </ol>
+      <p>空白貼上區則顯示索引全部列。</p>
+      <h2>預期檔案</h2>
+      <ul>
+        <li>讀：歷史入庫根目錄與 <code>YYYY/YYMM</code> 子資料夾內的入庫單 <code>.xlsx</code></li>
+        <li>讀寫：根目錄 <code>入庫明細索引.xlsx</code>（雲端既有檔，系統依檔 ID 覆寫，不新建）</li>
+      </ul>
+      <p>入庫單請放到例如 <code>2026/2608/</code>（西元年／年月）。轉換頁下載的檔若還沒上傳到對應月份，這裡查不到。</p>
+      <h2>常見問題</h2>
+      <ul>
+        <li><strong>索引寫回失敗</strong>：找工程師確認 service account 對歷史入庫資料夾有編輯權，以及 <code>入庫明細索引.xlsx</code> 的檔 ID 是否仍有效。</li>
+        <li><strong>篩選 0 筆</strong>：代碼與欄位不一致，或該商品不在已上傳的入庫單裡。</li>
+        <li><strong>日期空白</strong>：檔名不是 <code>sitegiant採購入庫單_yymmdd_廠商_單號.xlsx</code>，且表內也沒有「銷貨日期」。</li>
+        <li><strong>第一次很慢</strong>：正在把各張入庫單合併成索引；之後來源沒變就只讀索引。</li>
+        <li><strong>憑證缺失／無效</strong>：找工程師，不要貼金鑰。</li>
+      </ul>
+      <nav class="pager">
+        <a href="03-sitegiant-history.html">上一頁：歷史入庫單紀錄</a>
+        <a href="04-sitegiant-upc.html">下一頁：批量新增UPC</a>
+      </nav>
+    </main>
+  </div>
+</body>
+</html>

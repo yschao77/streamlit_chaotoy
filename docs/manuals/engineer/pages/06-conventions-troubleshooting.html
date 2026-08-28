@@ -43,7 +43,7 @@ df["條碼"] = df["條碼"].map(clean_barcode)</code></pre>
         <li><code>views/</code> 既有 sys.path 補丁可保留，新檔不要再複製一份</li>
       </ul>
       <h2>快取</h2>
-      <p>寫雲端成功後常見要清：<code>load_master_data</code>、<code>load_shopee_data</code>、<code>get_cached_gdrive_id</code>、<code>get_cached_gdrive_file_bytes</code>、狀態頁 <code>_cached_status</code>。</p>
+      <p>寫雲端成功後常見要清：<code>load_master_data</code>、<code>load_shopee_data</code>、<code>get_cached_gdrive_id</code>、<code>get_cached_gdrive_file_bytes</code>、狀態頁 <code>_cached_status</code>。入庫覆寫後與查詢頁「重新載入索引」會清 <code>get_cached_gdrive_file_bytes</code> 與 <code>_load_history_inward_index_cached</code>。</p>
       <h2>故障排除</h2>
       <table>
         <thead><tr><th>現象</th><th>先查</th></tr></thead>
@@ -52,7 +52,9 @@ df["條碼"] = df["條碼"].map(clean_barcode)</code></pre>
           <tr><td>files.list 空</td><td>service account 沒被加進該資料夾</td></tr>
           <tr><td>找不到 mass_update / batch_edit</td><td>檔名日期格式與 kind</td></tr>
           <tr><td>統整表無法回寫</td><td>雲端沒有既有主檔；API 不新建</td></tr>
-          <tr><td>歷史入庫只下載</td><td>沒有同名檔</td></tr>
+          <tr><td>歷史入庫只下載</td><td>月份資料夾沒有同名檔</td></tr>
+          <tr><td>入庫索引未寫回</td><td>ID_HISTORY_INWARD_INDEX 無效或沒有編輯權</td></tr>
+          <tr><td>查詢入庫看不到單</td><td>檔未上傳或不在 YYYY/YYMM</td></tr>
           <tr><td>UPC 填補 0 筆</td><td>蝦皮列表空或 SKU 對不上 GTIN</td></tr>
           <tr><td>重複匯入被拒</td><td>md5 已在匯入紀錄</td></tr>
           <tr><td>條碼對不上</td><td>未經 clean_barcode；科學記號</td></tr>

@@ -86,7 +86,15 @@ ID_SHOPEE_SHIPPING_FOLDER = "1RKIEv0x3G1BCCS6FKEyW1smKCg6SHsXI"
 ID_SHOPEE_UNPUBLISHED_FOLDER = "1pVqpUUHl9RlKL-1wlje4VMP2DkEUStXk"
 ID_DOWNLOAD_ROOT = "1U0tRNz1j62ouKwtT9s-OlrtmBQGlQ5bU"
 ID_PRICE_SUMMARY_FALLBACK = "1d2a6D6-9LV6oBhlwXjb_9xm5TYN80sPd"
+ID_HISTORY_INWARD_INDEX = "12YbAlXcOdM3lFYFkh7a82yZZe7KotRNe"
 UPC_FILLED_FILENAME = "batch_edit_upc_added_only.xlsx"
+HISTORY_INWARD_INDEX_NAME = "入庫明細索引.xlsx"
+FOLDER_MIME_QUERY = "mimeType = 'application/vnd.google-apps.folder'"
+YEAR_OR_YYMM_FOLDER_RE = re.compile(r"^\d{4}$")
+INWARD_FILENAME_RE = re.compile(
+    r"^sitegiant採購入庫單_(\d{6})_([^_]+)_(.+?)(?:_待處理)?\.(xlsx|xls)$",
+    re.I,
+)
 
 TRACKED_SOURCES = (
     {
@@ -358,6 +366,430 @@ def list_gdrive_files(folder_id, name_contains=None, include_zip=False):
     except Exception as e:
         _notify_error(f"掃描雲端資料夾失敗: {str(e)}")
         return []
+
+
+def _list_gdrive_folders_raw(folder_id):
+    query = f"'{folder_id}' in parents and {FOLDER_MIME_QUERY} and trashed = false"
+    folders = []
+    page_token = None
+    while True:
+        results = get_drive_service().files().list(
+            q=query,
+            fields="nextPageToken, files(id, name, modifiedTime)",
+            pageSize=100,
+            pageToken=page_token,
+        ).execute()
+        folders.extend(results.get("files", []))
+        page_token = results.get("nextPageToken")
+        if not page_token:
+            break
+    return folders
+
+
+def _is_history_inward_index_name(name):
+    return str(name or "").strip() == HISTORY_INWARD_INDEX_NAME
+
+
+def _with_folder_path(file_meta, folder_path):
+    item = dict(file_meta)
+    item["folder_path"] = folder_path or ""
+    return item
+
+
+def list_history_inward_files(folder_id):
+    """根目錄 xlsx（排除索引）+ YYYY/YYMM 子資料夾內的入庫單。"""
+    files = []
+    try:
+        for f in _list_gdrive_files_raw(folder_id):
+            if _is_history_inward_index_name(f.get("name")):
+                continue
+            files.append(_with_folder_path(f, ""))
+        year_folders = [
+            d for d in _list_gdrive_folders_raw(folder_id)
+            if YEAR_OR_YYMM_FOLDER_RE.match(str(d.get("name") or "").strip())
+        ]
+        for year_folder in year_folders:
+            year_name = str(year_folder.get("name") or "").strip()
+            month_folders = [
+                d for d in _list_gdrive_folders_raw(year_folder["id"])
+                if YEAR_OR_YYMM_FOLDER_RE.match(str(d.get("name") or "").strip())
+            ]
+            for month_folder in month_folders:
+                month_name = str(month_folder.get("name") or "").strip()
+                folder_path = f"{year_name}/{month_name}"
+                for f in _list_gdrive_files_raw(month_folder["id"]):
+                    if _is_history_inward_index_name(f.get("name")):
+                        continue
+                    files.append(_with_folder_path(f, folder_path))
+    except Exception as e:
+        _notify_error(f"掃描雲端資料夾失敗: {str(e)}")
+        return []
+    files.sort(key=lambda x: (x.get("folder_path") or "", x.get("name") or ""), reverse=True)
+    return files
+
+
+def find_history_inward_index_file(folder_id=None):
+    """回傳根目錄入庫明細索引。優先使用固定檔 ID，找不到再依檔名搜尋。"""
+    if ID_HISTORY_INWARD_INDEX:
+        return {"id": ID_HISTORY_INWARD_INDEX, "name": HISTORY_INWARD_INDEX_NAME}
+    if not folder_id:
+        return None
+    try:
+        for f in _list_gdrive_files_raw(folder_id):
+            if _is_history_inward_index_name(f.get("name")):
+                return f
+    except Exception as e:
+        _notify_error(f"掃描雲端資料夾失敗: {str(e)}")
+    return None
+
+
+def parse_inward_filename(name):
+    """從 sitegiant採購入庫單_yymmdd_廠商_單號.xlsx 拆日期、廠商、單號。"""
+    text = str(name or "").strip()
+    m = INWARD_FILENAME_RE.match(text)
+    if not m:
+        return {
+            "yymmdd": "",
+            "date_iso": "",
+            "yyyy": "",
+            "yymm": "",
+            "vendor": "",
+            "order_no": "",
+        }
+    yymmdd = m.group(1)
+    yy, mm, dd = yymmdd[:2], yymmdd[2:4], yymmdd[4:6]
+    try:
+        datetime.date(2000 + int(yy), int(mm), int(dd))
+        date_iso = f"{2000 + int(yy):04d}-{mm}-{dd}"
+        yyyy = f"{2000 + int(yy):04d}"
+        yymm = yy + mm
+    except ValueError:
+        date_iso, yyyy, yymm = "", "", ""
+    return {
+        "yymmdd": yymmdd,
+        "date_iso": date_iso,
+        "yyyy": yyyy,
+        "yymm": yymm,
+        "vendor": str(m.group(2) or "").strip(),
+        "order_no": str(m.group(3) or "").strip(),
+    }
+
+
+def history_inward_file_label(file_meta):
+    path = str((file_meta or {}).get("folder_path") or "").strip()
+    name = str((file_meta or {}).get("name") or "").strip()
+    if path:
+        return f"{path} / {name}"
+    return name
+
+
+def history_inward_option_map(files):
+    """label → file meta；跨月同名時在標籤加上 id 前綴以免互蓋。"""
+    seen = {}
+    options = {}
+    for f in files or []:
+        label = history_inward_file_label(f)
+        if label in seen:
+            label = f"{label} ({str(f.get('id') or '')[:8]})"
+        seen[label] = True
+        options[label] = f
+    return options
+
+
+def match_history_inward_file(hist_files, file_name):
+    """匯入時對雲端既有檔：同名唯一則用之；多筆時用檔名日期對 YYYY/YYMM。"""
+    name = str(file_name or "").strip()
+    matches = [f for f in (hist_files or []) if str(f.get("name") or "").strip() == name]
+    if not matches:
+        return None
+    if len(matches) == 1:
+        return matches[0]
+    parsed = parse_inward_filename(name)
+    want = ""
+    if parsed.get("yyyy") and parsed.get("yymm"):
+        want = f"{parsed['yyyy']}/{parsed['yymm']}"
+    if want:
+        for f in matches:
+            if str(f.get("folder_path") or "").strip() == want:
+                return f
+    matches.sort(key=lambda x: x.get("modifiedTime") or "", reverse=True)
+    return matches[0]
+
+
+def _cell_str(val):
+    if val is None:
+        return ""
+    try:
+        if pd.isna(val):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    s = str(val).strip()
+    if s.lower() in ("nan", "none"):
+        return ""
+    return s
+
+
+def _inward_source_fingerprint(files):
+    return tuple(sorted(
+        (
+            _cell_str(f.get("id")),
+            _cell_str(f.get("folder_path")),
+            _cell_str(f.get("name")),
+            _cell_str(f.get("modifiedTime")),
+        )
+        for f in (files or [])
+    ))
+
+
+def _fingerprint_from_sources_df(df):
+    if df is None or df.empty:
+        return tuple()
+    out = df.copy()
+    out.columns = [str(c).strip() for c in out.columns]
+    rows = []
+    for row in out.itertuples(index=False):
+        rec = {str(col).strip(): row[i] for i, col in enumerate(out.columns)}
+        rows.append((
+            _cell_str(rec.get("id")),
+            _cell_str(rec.get("folder_path")),
+            _cell_str(rec.get("name")),
+            _cell_str(rec.get("modifiedTime")),
+        ))
+    return tuple(sorted(rows))
+
+
+def _clean_inward_sku(val):
+    if pd.isna(val):
+        return ""
+    s = str(val).strip()
+    if s.lower() in ("nan", "none"):
+        return ""
+    if s.endswith(".0"):
+        s = s[:-2]
+    return s
+
+
+def _inward_qty(val):
+    if pd.isna(val):
+        return 0
+    try:
+        return int(float(val))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _normalize_inward_date(val, fallback_iso=""):
+    if isinstance(val, datetime.datetime):
+        return val.strftime("%Y-%m-%d")
+    if isinstance(val, datetime.date):
+        return val.strftime("%Y-%m-%d")
+    if pd.isna(val):
+        return fallback_iso
+    s = str(val).strip()
+    if s.lower() in ("", "nan", "none"):
+        return fallback_iso
+    if s.endswith(".0"):
+        s = s[:-2]
+    if re.fullmatch(r"\d{6}", s):
+        parsed = parse_inward_filename(f"sitegiant採購入庫單_{s}_x_x.xlsx")
+        return parsed.get("date_iso") or fallback_iso
+    m = re.match(r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})", s)
+    if m:
+        try:
+            dt = datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            return dt.strftime("%Y-%m-%d")
+        except ValueError:
+            return fallback_iso or s
+    return fallback_iso or s
+
+
+def _parse_inward_file_rows(file_meta, file_bytes):
+    engine_kw = {"engine": "calamine"} if HAS_CALAMINE else {}
+    payload = file_bytes.getvalue() if isinstance(file_bytes, io.BytesIO) else file_bytes
+    df = pd.read_excel(io.BytesIO(payload), **engine_kw)
+    df.columns = [str(c).strip().replace("\n", "") for c in df.columns]
+    if "國際條碼" not in df.columns:
+        raise ValueError("檔案缺少「國際條碼」欄位")
+    parsed = parse_inward_filename(file_meta.get("name"))
+    fallback_iso = parsed.get("date_iso") or ""
+    vendor = parsed.get("vendor") or ""
+    order_no = parsed.get("order_no") or ""
+    folder_path = str(file_meta.get("folder_path") or "").strip()
+    file_name = str(file_meta.get("name") or "").strip()
+    rows = []
+    for _, row in df.iterrows():
+        barcode = clean_barcode(row.get("國際條碼"))
+        if not barcode:
+            continue
+        date_val = row.get("銷貨日期") if "銷貨日期" in df.columns else None
+        rows.append({
+            "銷貨日期": _normalize_inward_date(date_val, fallback_iso),
+            "國際條碼": barcode,
+            "庫存SKU": _clean_inward_sku(row.get("庫存SKU")) if "庫存SKU" in df.columns else "",
+            "庫存貨品名稱": _clean_inward_sku(row.get("庫存貨品名稱")) if "庫存貨品名稱" in df.columns else "",
+            "數量": _inward_qty(row.get("數量")) if "數量" in df.columns else 0,
+            "廠商": vendor,
+            "入庫單號": order_no,
+            "資料夾": folder_path,
+            "檔名": file_name,
+        })
+    return rows
+
+
+def _history_inward_index_bytes(detail_df, sources_df):
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        detail_df.to_excel(writer, index=False, sheet_name="明細")
+        sources_df.to_excel(writer, index=False, sheet_name="來源檔")
+    return buf.getvalue()
+
+
+def _empty_inward_detail_df():
+    return pd.DataFrame(columns=[
+        "銷貨日期", "國際條碼", "庫存SKU", "庫存貨品名稱", "數量",
+        "廠商", "入庫單號", "資料夾", "檔名",
+    ])
+
+
+def _sources_df_from_files(files):
+    return pd.DataFrame(
+        [
+            {
+                "id": f.get("id") or "",
+                "folder_path": f.get("folder_path") or "",
+                "name": f.get("name") or "",
+                "modifiedTime": f.get("modifiedTime") or "",
+            }
+            for f in (files or [])
+        ],
+        columns=["id", "folder_path", "name", "modifiedTime"],
+    )
+
+
+def rebuild_history_inward_index(folder_id, files=None):
+    files = list(files) if files is not None else list_history_inward_files(folder_id)
+    skipped = []
+    rows = []
+    for f in files:
+        label = history_inward_file_label(f)
+        try:
+            file_bytes = download_gdrive_file_to_bytes(f["id"])
+            rows.extend(_parse_inward_file_rows(f, file_bytes))
+        except Exception as exc:
+            msg = str(exc)
+            lowered = msg.lower()
+            if any(k in lowered for k in ["憑證", "credential", "private_key", "textkey", "service_account"]):
+                reason = "憑證缺失／無效"
+            elif "國際條碼" in msg or "缺少" in msg:
+                reason = msg
+            else:
+                reason = "讀取失敗"
+            skipped.append({"name": label, "reason": reason})
+    detail_df = pd.DataFrame(rows) if rows else _empty_inward_detail_df()
+    if not detail_df.empty:
+        detail_df = detail_df.sort_values(
+            by=["銷貨日期", "檔名"],
+            ascending=[False, False],
+            kind="mergesort",
+        ).reset_index(drop=True)
+    sources_df = _sources_df_from_files(files)
+    written = False
+    index_meta = find_history_inward_index_file(folder_id)
+    if index_meta:
+        upload_or_update_gdrive_file(
+            folder_id,
+            HISTORY_INWARD_INDEX_NAME,
+            _history_inward_index_bytes(detail_df, sources_df),
+            existing_file_id=index_meta["id"],
+        )
+        written = True
+    return {
+        "df": detail_df,
+        "skipped": skipped,
+        "rebuilt": True,
+        "written": written,
+        "index_exists": bool(index_meta),
+        "file_count": len(files),
+    }
+
+
+def _read_history_inward_index_sheets(file_bytes):
+    payload = file_bytes.getvalue() if isinstance(file_bytes, io.BytesIO) else file_bytes
+    engine_kw = {"engine": "calamine"} if HAS_CALAMINE else {}
+    with pd.ExcelFile(io.BytesIO(payload), **engine_kw) as xls:
+        names = set(xls.sheet_names)
+        if "明細" not in names or "來源檔" not in names:
+            return None, None
+        detail_df = pd.read_excel(xls, sheet_name="明細", dtype=str)
+        sources_df = pd.read_excel(xls, sheet_name="來源檔", dtype=str)
+    if "數量" in detail_df.columns:
+        detail_df["數量"] = detail_df["數量"].map(_inward_qty)
+    if "國際條碼" in detail_df.columns:
+        detail_df["國際條碼"] = detail_df["國際條碼"].map(clean_barcode)
+    if "庫存SKU" in detail_df.columns:
+        detail_df["庫存SKU"] = detail_df["庫存SKU"].map(_clean_inward_sku)
+    return detail_df, sources_df
+
+
+@st.cache_data(ttl=600, show_spinner="☁️ 正在載入入庫紀錄...")
+def _load_history_inward_index_cached(folder_id, files_payload):
+    files = json.loads(files_payload)
+    fingerprint = _inward_source_fingerprint(files)
+    index_meta = find_history_inward_index_file(folder_id)
+    if index_meta:
+        try:
+            index_bytes = download_gdrive_file_to_bytes(index_meta["id"])
+            detail_df, sources_df = _read_history_inward_index_sheets(index_bytes)
+            if detail_df is not None and _fingerprint_from_sources_df(sources_df) == fingerprint:
+                if detail_df.empty:
+                    detail_df = _empty_inward_detail_df()
+                return {
+                    "df": detail_df,
+                    "skipped": [],
+                    "rebuilt": False,
+                    "written": False,
+                    "index_exists": True,
+                    "file_count": len(files),
+                }
+        except Exception:
+            pass
+    return rebuild_history_inward_index(folder_id, files=files)
+
+
+def load_history_inward_index(folder_id):
+    files = list_history_inward_files(folder_id)
+    payload = json.dumps(
+        [
+            {
+                "id": f.get("id") or "",
+                "name": f.get("name") or "",
+                "modifiedTime": f.get("modifiedTime") or "",
+                "folder_path": f.get("folder_path") or "",
+            }
+            for f in files
+        ],
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    result = _load_history_inward_index_cached(folder_id, payload)
+    out = dict(result)
+    df = result.get("df")
+    out["df"] = df.copy() if df is not None else _empty_inward_detail_df()
+    out["skipped"] = list(result.get("skipped") or [])
+    return out
+
+
+def invalidate_history_inward_caches():
+    """入庫單或索引寫回後呼叫，避免重建掃到舊 bytes。"""
+    get_cached_gdrive_file_bytes.clear()
+    _load_history_inward_index_cached.clear()
+
+
+def refresh_history_inward_index(folder_id):
+    """清入庫檔 bytes 與索引快取後重載，給查詢頁「重新載入」使用。"""
+    invalidate_history_inward_caches()
+    return load_history_inward_index(folder_id)
 
 
 def _normalize_kind(kind):

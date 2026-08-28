@@ -57,6 +57,7 @@
 
 - [Sitegiant 採購入庫單格式轉換](pages/02-sitegiant-inward.md)
 - [Sitegiant 歷史入庫單紀錄](pages/03-sitegiant-history.md)
+- [查詢入庫紀錄](pages/12-inward-query.md)
 - [Sitegiant 批量新增UPC](pages/04-sitegiant-upc.md)
 - [採購單待處理](pages/05-pending-po.md)
 

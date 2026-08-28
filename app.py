@@ -306,7 +306,7 @@ else:
     st.sidebar.markdown("### 🌐 Sitegiant 電商整合管理")
     sub_page = st.sidebar.radio(
         "請選擇執行項目：",
-        ["🔀 Sitegiant 採購入庫單格式轉換", "📜 Sitegiant 歷史入庫單紀錄", "📦 Sitegiant 批量新增UPC", "📋 採購單待處理"],
+        ["🔀 Sitegiant 採購入庫單格式轉換", "📜 Sitegiant 歷史入庫單紀錄", "🔍 查詢入庫紀錄", "📦 Sitegiant 批量新增UPC", "📋 採購單待處理"],
         index=0
     )
     sitegiant_page.render(

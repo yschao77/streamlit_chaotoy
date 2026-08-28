@@ -1,3 +1,6 @@
+- 歷史入庫單: 1ZQ7x4BdRc6BJlURxQ61JqDKrKF7h_vSH
+  - 入庫單放 YYYY/YYMM 子資料夾（例如 2026/2608）
+  - 入庫明細索引.xlsx: 12YbAlXcOdM3lFYFkh7a82yZZe7KotRNe
 - 下載資料: 1U0tRNz1j62ouKwtT9s-OlrtmBQGlQ5bU
 - Sitegiant_UPC: 1-SDUlCjAiDsuPOqJudgvt3cil1UgQb3U
   - download: batch_edit_item_upc_assignment_all__DD-MM-YYYY-*.zip

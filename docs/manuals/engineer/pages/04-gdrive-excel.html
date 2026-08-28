@@ -61,9 +61,10 @@
           <tr><td>麗嬰採購產品總表.xlsm</td><td>麗嬰國際產品總表、已處理採購單、刪除紀錄、metadata</td></tr>
           <tr><td>蝦皮賣場商品列表.xlsm</td><td>蝦皮商品列表、匯入檔案</td></tr>
           <tr><td>商品蝦皮麗嬰價格統整表.xlsx</td><td>商品蝦皮麗嬰價格統整表</td></tr>
+          <tr><td>入庫明細索引.xlsx</td><td>明細、來源檔（歷史入庫根目錄）</td></tr>
         </tbody>
       </table>
-      <p>蝦皮校正來源為最新 mass_update；匯入去重用 md5。歷史入庫沒有同名檔時只下載、不新建。</p>
+      <p>蝦皮校正來源為最新 mass_update；匯入去重用 md5。歷史入庫單在 <code>YYYY/YYMM</code> 子資料夾；沒有同名檔時只下載、不新建。查詢索引 <code>入庫明細索引.xlsx</code> 放根目錄，以 <code>ID_HISTORY_INWARD_INDEX</code> 覆寫。</p>
       <nav class="pager">
         <a href="03-file-roles.html">上一頁：檔案職責</a>
         <a href="05-ci-sync.html">下一頁：定時同步</a>

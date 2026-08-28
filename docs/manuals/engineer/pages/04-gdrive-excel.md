@@ -31,7 +31,7 @@
 
 `consumed=False` 只出現在狀態頁，不寫入主表。
 
-常數定義在 `utils.py`（資料夾 ID 不是憑證）。另有 `ID_HISTORY_INWARD_FOLDER`、`ID_DOWNLOAD_ROOT`、`ID_PRICE_SUMMARY_FALLBACK`。
+常數定義在 `utils.py`（資料夾 ID 不是憑證）。另有 `ID_HISTORY_INWARD_FOLDER`、`ID_HISTORY_INWARD_INDEX`、`ID_DOWNLOAD_ROOT`、`ID_PRICE_SUMMARY_FALLBACK`。
 
 ## 工作表
 
@@ -40,10 +40,11 @@
 | 麗嬰採購產品總表.xlsm | `麗嬰國際產品總表`、`已處理採購單`、`刪除紀錄`、`metadata` |
 | 蝦皮賣場商品列表.xlsm | `蝦皮商品列表`、`匯入檔案` |
 | 商品蝦皮麗嬰價格統整表.xlsx | `商品蝦皮麗嬰價格統整表` |
+| 入庫明細索引.xlsx | `明細`、`來源檔` |
 
 蝦皮校正來源為最新 mass_update；匯入去重用 md5。
 
-歷史入庫：雲端沒有同名檔時只提供下載，不 `allow_create`。
+歷史入庫：單據在 `YYYY/YYMM` 子資料夾（例如 `2026/2608`）。雲端沒有同名檔時只提供下載，不 `allow_create`。查詢用的 `入庫明細索引.xlsx` 放在歷史入庫**根目錄**，以 `ID_HISTORY_INWARD_INDEX` 覆寫；工作表為 `明細`、`來源檔`。
 
 ## 條碼
 

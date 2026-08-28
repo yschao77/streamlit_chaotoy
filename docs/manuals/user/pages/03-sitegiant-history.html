@@ -19,6 +19,7 @@
       <a href="01-cloud-status.html">各表最新修改時間</a>
       <a href="02-sitegiant-inward.html">Sitegiant 採購入庫單格式轉換</a>
       <a class="current" href="03-sitegiant-history.html">Sitegiant 歷史入庫單紀錄</a>
+      <a href="12-inward-query.html">查詢入庫紀錄</a>
       <a href="04-sitegiant-upc.html">Sitegiant 批量新增UPC</a>
       <a href="05-pending-po.html">採購單待處理</a>
       <a href="06-powerquery.html">PowerQuery 執行三表整合</a>
@@ -37,6 +38,7 @@
           <li>用統整表 <code>c</code> → <code>sitegiant庫存SKU</code> 更新「庫存貨品名稱」。</li>
           <li>雲端已有同檔名才覆寫；沒有同名檔只給本機下載，不會新建。</li>
           <li>可調閱單張歷史單並看成本、稅款加總。</li>
+          <li>入庫單在 <code>YYYY/YYMM</code> 子資料夾；選單顯示路徑。根目錄索引檔不會出現在選單。</li>
         </ul>
       </aside>
       <h2>何時使用</h2>
@@ -57,14 +59,15 @@
       </ol>
       <h3>調閱與加總</h3>
       <ol>
-        <li>選一張入庫對帳單。</li>
+        <li>選一張入庫對帳單（標籤為 <code>2026/2608 / 檔名.xlsx</code>）。</li>
         <li>看明細；下方顯示「成本 × 數量」「稅款 × 數量」總額。</li>
         <li>可下載該檔。</li>
       </ol>
+      <p>跨月若有同名檔，匯入時會用檔名裡的日期對應月份資料夾。</p>
       <h2>預期檔案</h2>
       <ul>
         <li>讀：<code>商品蝦皮麗嬰價格統整表.xlsx</code>（沒有主檔時用後備統整表）</li>
-        <li>讀寫：歷史入庫資料夾既有 <code>.xlsx</code></li>
+        <li>讀寫：歷史入庫根目錄與 <code>YYYY/YYMM</code> 內既有入庫 <code>.xlsx</code>（不含索引檔）</li>
       </ul>
       <h2>常見問題</h2>
       <ul>
@@ -75,7 +78,7 @@
       </ul>
       <nav class="pager">
         <a href="02-sitegiant-inward.html">上一頁：採購入庫單格式轉換</a>
-        <a href="04-sitegiant-upc.html">下一頁：批量新增UPC</a>
+        <a href="12-inward-query.html">下一頁：查詢入庫紀錄</a>
       </nav>
     </main>
   </div>
