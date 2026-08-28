@@ -542,6 +542,19 @@ def clean_barcode(val):
         except: pass
     return s
 
+def resolve_shopee_gtin_column(columns):
+    """mass_update / 蝦皮主表的 GTIN 欄：新名「國際條碼 (GTIN)」或舊名 GTIN。"""
+    cols = [str(c).strip() for c in columns]
+    for name in ("國際條碼 (GTIN)", "國際條碼（GTIN）"):
+        if name in cols:
+            return name
+    if "GTIN" in cols:
+        return "GTIN"
+    for c in cols:
+        if "GTIN" in str(c).upper():
+            return c
+    raise ValueError("缺少 GTIN／國際條碼 (GTIN)")
+
 def process_smart_headers(df_raw, header_row_idx):
     if header_row_idx >= 5 and len(df_raw) > 5:
         row_5 = df_raw.iloc[4].fillna("").astype(str).str.strip()
@@ -810,8 +823,9 @@ def build_price_summary_df(master_file_id, local_prod_id, shopee_master_id, site
     if "商品名稱" in df_p.columns:
         df_p = df_p.rename(columns={"商品名稱": "內部商品名稱"})
 
-    df_merge1 = pd.merge(df_p, df_s[["商品名稱", "iSKU", "GTIN", "價格"]], left_on="自定義編碼", right_on="iSKU", how="left")
-    df_merge1 = df_merge1.rename(columns={"商品名稱": "蝦皮商品名稱", "GTIN": "蝦皮GTIN", "價格": "蝦皮售價"})
+    gtin_col = resolve_shopee_gtin_column(df_s.columns)
+    df_merge1 = pd.merge(df_p, df_s[["商品名稱", "iSKU", gtin_col, "價格"]], left_on="自定義編碼", right_on="iSKU", how="left")
+    df_merge1 = df_merge1.rename(columns={"商品名稱": "蝦皮商品名稱", gtin_col: "蝦皮GTIN", "價格": "蝦皮售價"})
     df_merge1["c"] = df_merge1["c"].astype(str).str.strip().str.split(".").str[0]
 
     df_final = pd.merge(df_merge1, df_liying[["條碼", "零售價", "含稅"]], left_on="c", right_on="條碼", how="left")
@@ -870,7 +884,8 @@ def correct_shopee_isku(file_bytes):
     df_valid_isku = df_shopee[df_shopee["iSKU"] != "蝦皮無iSKU"].copy()
     df_isku_keep = df_valid_isku.sort_values(by=["iSKU", "價格", "original_index"]).drop_duplicates(subset=["iSKU"], keep="last")
     df_gtin_check = df_isku_keep.copy()
-    df_gtin_check["GTIN_str"] = df_gtin_check["GTIN"].astype(str).str.strip().str.split(".").str[0]
+    gtin_col = resolve_shopee_gtin_column(df_gtin_check.columns)
+    df_gtin_check["GTIN_str"] = df_gtin_check[gtin_col].astype(str).str.strip().str.split(".").str[0]
     df_gtin_keep = df_gtin_check[~df_gtin_check["GTIN_str"].isin(["", "00", "0", "nan"])].sort_values(
         by=["GTIN_str", "價格", "original_index"]
     ).drop_duplicates(subset=["GTIN_str"], keep="last")
@@ -994,8 +1009,9 @@ def fill_sitegiant_upc(df_sg, df_shopee_list):
         raise ValueError("蝦皮商品列表是空的，無法填補 UPC。")
 
     work = df_shopee_list.copy()
+    gtin_col = resolve_shopee_gtin_column(work.columns)
     work["iSKU"] = work["iSKU"].astype(str).str.strip()
-    work["GTIN_str"] = work["GTIN"].astype(str).str.strip().str.split(".").str[0]
+    work["GTIN_str"] = work[gtin_col].astype(str).str.strip().str.split(".").str[0]
     valid = work[~work["GTIN_str"].isin(["", "00", "0", "nan", "#N/A", "None", "空白"])]
     upc_map = dict(zip(valid["iSKU"], valid["GTIN_str"]))
 

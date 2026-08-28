@@ -52,7 +52,7 @@
       <ul>
         <li>優先用「商品選項貨號」，否則用「主商品貨號」。</li>
         <li>兩者都空則標「蝦皮無 iSKU」並排除。</li>
-        <li>同一 iSKU 留價格較後的一筆；有效 GTIN 再依 GTIN 去重。</li>
+        <li>同一 iSKU 留價格較後的一筆；有效 GTIN 再依 GTIN 去重。來源欄為 <code>國際條碼 (GTIN)</code>（舊檔仍可能是 <code>GTIN</code>）。</li>
       </ul>
       <p>結果寫入 <code>蝦皮賣場商品列表.xlsm</code> 的「蝦皮商品列表」，並在「匯入檔案」記檔名、md5、時間。</p>
       <div class="callout info">其他蝦皮資料夾（媒體、標題描述、配送、未上架）只在狀態頁監看，本頁不會讀。</div>
