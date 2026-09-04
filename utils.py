@@ -148,6 +148,16 @@ TRACKED_SOURCES = (
         "consumed": True,
     },
     {
+        "key": "sitegiant_upc_updated",
+        "folder": "Sitegiant_UPC",
+        "folder_id": ID_SITEGIANT_UPC_FOLDER,
+        "name_contains": "batch_edit_upc_added_only",
+        "kind": "dmy",
+        "pattern": "batch_edit_upc_added_only.xlsx",
+        "include_zip": False,
+        "consumed": True,
+    },
+    {
         "key": "sitegiant_basic",
         "folder": "Sitegiant_BasicInfo",
         "folder_id": ID_SITEGIANT_BATCH_FOLDER,
