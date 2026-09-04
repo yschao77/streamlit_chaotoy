@@ -152,7 +152,7 @@ TRACKED_SOURCES = (
         "folder": "Sitegiant_UPC",
         "folder_id": ID_SITEGIANT_UPC_FOLDER,
         "name_contains": "batch_edit_upc_added_only",
-        "kind": "dmy",
+        "kind": "keyword",
         "pattern": "batch_edit_upc_added_only.xlsx",
         "include_zip": False,
         "consumed": True,
