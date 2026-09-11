@@ -39,6 +39,8 @@ from utils import (
     save_preorder_tracker,
     probe_sg_restock_template,
     preorder_tracker_bytes,
+    load_preorder_orders,
+    build_preorder_board,
     PREORDER_TRACKER_NAME,
 )
 
@@ -47,6 +49,121 @@ def _inward_excel_bytes(df, sheet_name="SiteGiant入庫單"):
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name=sheet_name)
     return buf.getvalue()
+
+
+def _render_preorder_orders_board(campaign_df):
+    st.subheader("📦 訂單三欄看板（第2階）")
+    st.info(
+        "依活動 **SKU** 對 All Orders 的 **庫存SKU**（空白才改用商品SKU）。"
+        "不過濾商城。`已取消` 不算進已接單與三欄；件數用 **商品數量**。"
+        " Paid＝已付款；貨到付款 Unpaid＝未付款且付款方式含 Cash on Delivery／貨到付款／取貨付款；其餘未付款進銀行 Unpaid。"
+        " 本機上傳只預覽，不會把 Orders 寫進 Drive。"
+    )
+
+    uploaded = st.file_uploader(
+        "本機上傳 All Orders 預覽（不會上傳到 Drive）",
+        type=["xlsx", "xls"],
+        key="preorder_orders_local",
+        help="覆蓋本次畫面使用的 Orders；不會 files.create／update 到雲端。",
+    )
+    reload_orders = st.button(
+        "🔄 重新載入雲端 All Orders",
+        use_container_width=True,
+        key="preorder_orders_reload",
+    )
+    if reload_orders:
+        get_cached_gdrive_file_bytes.clear()
+        st.session_state.pop("preorder_orders_loaded", None)
+        st.session_state.pop("preorder_orders_local_cache", None)
+        st.session_state.pop("preorder_orders_local_key", None)
+        st.rerun()
+
+    if "preorder_orders_loaded" not in st.session_state:
+        with st.spinner("⏳ 正在載入雲端最新 All Orders…"):
+            st.session_state["preorder_orders_loaded"] = load_preorder_orders()
+    drive_loaded = st.session_state.get("preorder_orders_loaded") or {}
+    drive = drive_loaded.get("drive") or {}
+
+    if uploaded is not None:
+        local_key = (uploaded.name, uploaded.size)
+        if st.session_state.get("preorder_orders_local_key") != local_key:
+            st.session_state["preorder_orders_local_cache"] = load_preorder_orders(
+                uploaded.getvalue(),
+                uploaded.name,
+                drive=drive,
+            )
+            st.session_state["preorder_orders_local_key"] = local_key
+        loaded_orders = st.session_state.get("preorder_orders_local_cache") or {}
+    else:
+        st.session_state.pop("preorder_orders_local_cache", None)
+        st.session_state.pop("preorder_orders_local_key", None)
+        loaded_orders = drive_loaded
+
+    drive_name = drive.get("name") or "（無）"
+    drive_time = format_gdrive_time(drive.get("modified")) if drive.get("modified") else (
+        drive.get("reason") or "❌ 雲端檔案尚未建立/不存在"
+    )
+    st.caption(f"雲端最新 All Orders：`{drive_name}`　最後修改：`{drive_time}`")
+
+    if loaded_orders.get("preview"):
+        st.success(f"目前用本機檔預覽：`{loaded_orders.get('name')}`（未寫入 Drive）")
+
+    if not loaded_orders.get("ok"):
+        st.error(f"❌ 無法載入 All Orders：{loaded_orders.get('reason') or '未知錯誤'}")
+        st.info("可改本機上傳樣本預覽。請確認 service account 對 Sitegiant_Preorder_Orders 有檢視權，且檔名是 Orders_DD-MM-YYYY-*.xlsx。")
+        return
+
+    source_label = "本機預覽" if loaded_orders.get("preview") else "雲端"
+    modified_label = (
+        format_gdrive_time(loaded_orders.get("modified"))
+        if loaded_orders.get("modified")
+        else "（本機）"
+    )
+    st.caption(
+        f"看板來源：{source_label} `{loaded_orders.get('name')}`　"
+        f"最後修改：`{modified_label}`　"
+        f"列數：`{len(loaded_orders.get('orders') or [])}`"
+    )
+
+    board = build_preorder_board(campaign_df, loaded_orders.get("orders"))
+    if board["summary"].empty:
+        st.info("活動表沒有列，看板為空。請先在上方新增活動 SKU。")
+        return
+
+    over = board.get("over_limit_skus") or []
+    if over:
+        st.warning("⚠️ 已接單已達或超過上限：" + "、".join(f"`{sku}`" for sku in over))
+
+    st.dataframe(board["summary"], use_container_width=True, hide_index=True)
+    st.caption("Paid＝可打單；貨到付款 Unpaid＝可打單、不催款；銀行 Unpaid＝催款後才打單。結單兩檔尚未開放。")
+
+    for item in board["campaigns"]:
+        sku = item["sku"] or "（未填 SKU）"
+        title = (
+            f"{sku}　已接單 {item['accepted_qty']}／上限 {item['limit_label']}"
+            f"　Paid {item['paid_qty']}　貨到付款 Unpaid {item['cod_unpaid_qty']}　銀行 Unpaid {item['bank_unpaid_qty']}"
+        )
+        if item["over_limit"]:
+            title += "　⚠️ 達上限"
+        with st.expander(title):
+            if item["name"] or item["month"]:
+                st.caption(f"月份：{item['month'] or '—'}　品名：{item['name'] or '—'}")
+            c_paid, c_cod, c_bank = st.columns(3)
+            with c_paid:
+                st.markdown("**Paid（已付款）**")
+                st.caption("件數＝商品數量；可打單")
+                st.metric("Paid 件數", item["paid_qty"])
+                st.dataframe(item["paid_lines"], use_container_width=True, hide_index=True)
+            with c_cod:
+                st.markdown("**貨到付款 Unpaid**")
+                st.caption("未付款且貨到付款；可打單、不催款")
+                st.metric("貨到付款 Unpaid 件數", item["cod_unpaid_qty"])
+                st.dataframe(item["cod_unpaid_lines"], use_container_width=True, hide_index=True)
+            with c_bank:
+                st.markdown("**銀行 Unpaid**")
+                st.caption("其餘未付款；催款後才打單")
+                st.metric("銀行 Unpaid 件數", item["bank_unpaid_qty"])
+                st.dataframe(item["bank_unpaid_lines"], use_container_width=True, hide_index=True)
 
 
 def _xlsx_filename(name):
@@ -894,8 +1011,9 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
     elif sub_page == "🗓️ 預購追蹤":
         st.subheader("🗓️ 預購活動表（第1階）")
         st.info(
-            "此階只讀寫雲端 `預購追蹤.xlsx` 的活動欄。訂單三欄看板、結單兩檔尚未開放。"
+            "活動表讀寫雲端 `預購追蹤.xlsx`（第1階）。下方第2階用最新 All Orders 拆三欄；結單兩檔尚未開放。"
             " 寫回只覆寫既有檔，不會新建。Import Restock 空殼只讀、不會被蓋掉。"
+            " 本機上傳的 Orders 只預覽，不會上傳到 Drive。"
         )
 
         restock = probe_sg_restock_template()
@@ -921,6 +1039,7 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
             if reload:
                 get_cached_gdrive_file_bytes.clear()
                 st.session_state.pop("preorder_campaign_editor", None)
+                st.session_state.pop("preorder_orders_loaded", None)
             loaded = load_preorder_tracker()
             st.session_state["preorder_loaded"] = loaded
             if loaded.get("ok"):
@@ -992,3 +1111,6 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
                 use_container_width=True,
                 key="preorder_tracker_local_dl",
             )
+
+        st.write("---")
+        _render_preorder_orders_board(edited)

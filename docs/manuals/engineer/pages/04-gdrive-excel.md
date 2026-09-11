@@ -28,11 +28,11 @@
 | shopee_basic_info | 蝦皮_商品標題及描述 | `mass_update_basic_info_3062950_*.xlsx` | 否 |
 | shopee_shipping | 蝦皮_配送選項 | `mass_update_shipping_info_3062950_*.xlsx` | 否 |
 | shopee_unpublished | 蝦皮_未上架 | `mass_republish_items_3062950_*.xlsx` | 否 |
-| preorder_orders | Sitegiant_Preorder_Orders | `Orders_DD-MM-YYYY-*.xlsx` | 否 |
+| preorder_orders | Sitegiant_Preorder_Orders | `Orders_DD-MM-YYYY-*.xlsx` | 是 |
 | preorder_tracker | 預購追蹤.xlsx（file id） | `預購追蹤.xlsx` | 是 |
 | sg_restock_template | Import Restock 官方殼（file id，只讀） | 後台下載的空殼 | 否 |
 
-`consumed=False` 只出現在狀態頁，不寫入主表。
+`consumed=False` 只出現在狀態頁，不寫入主表。`preorder_orders` 已改為 consumed：預購追蹤第2階看板會讀最新 `Orders_DD-MM-YYYY-*.xlsx`。本機上傳只預覽，禁止把 All Orders `files.create` 到 Drive。
 
 常數定義在 `utils.py`（資料夾 ID 不是憑證）。另有 `ID_HISTORY_INWARD_FOLDER`、`ID_HISTORY_INWARD_INDEX`、`ID_DOWNLOAD_ROOT`、`ID_PRICE_SUMMARY_FALLBACK`、`ID_PREORDER_ORDERS_FOLDER`、`ID_PREORDER_TRACKER`、`ID_SG_RESTOCK_TEMPLATE`。
 

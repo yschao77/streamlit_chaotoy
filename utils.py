@@ -118,6 +118,41 @@ PREORDER_VENDOR_HISTORY_COLUMNS = (
     "鎖定時間",
     "備註",
 )
+PREORDER_ORDERS_REQUIRED_COLUMNS = (
+    "訂單編號",
+    "訂單狀態",
+    "付款狀態",
+    "付款方式",
+    "商品SKU",
+    "庫存SKU",
+    "商品數量",
+)
+PREORDER_ORDERS_LINE_COLUMNS = (
+    "訂單編號",
+    "SKU",
+    "商品數量",
+    "付款方式",
+    "付款狀態",
+    "訂單狀態",
+)
+PREORDER_BOARD_COLUMNS = (
+    "月份",
+    "SKU",
+    "品名",
+    "已接單",
+    "上限",
+    "Paid 件數",
+    "貨到付款 Unpaid 件數",
+    "銀行 Unpaid 件數",
+    "達上限",
+)
+PREORDER_CANCELLED_STATUS = "已取消"
+PREORDER_PAID_STATUS = "已付款"
+PREORDER_UNPAID_STATUS = "未付款"
+PREORDER_COD_PAY_MARKERS = ("cash on delivery", "貨到付款", "取貨付款")
+PREORDER_BUCKET_PAID = "paid"
+PREORDER_BUCKET_COD_UNPAID = "cod_unpaid"
+PREORDER_BUCKET_BANK_UNPAID = "bank_unpaid"
 XLSX_OOXML_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 GOOGLE_SHEETS_MIME = "application/vnd.google-apps.spreadsheet"
 FOLDER_MIME_QUERY = "mimeType = 'application/vnd.google-apps.folder'"
@@ -256,7 +291,7 @@ TRACKED_SOURCES = (
         "kind": "dmy",
         "pattern": "Orders_DD-MM-YYYY-*.xlsx",
         "include_zip": False,
-        "consumed": False,
+        "consumed": True,
     },
     {
         "key": "preorder_tracker",
@@ -1666,6 +1701,263 @@ def save_preorder_tracker(campaign_df, vendor_history_df=None, other_sheets=None
         return {"ok": False, "reason": _status_error_text(e)}
     get_cached_gdrive_file_bytes.clear()
     return {"ok": True, "bytes": payload, "name": file_name or PREORDER_TRACKER_NAME}
+
+
+def _preorder_text(val):
+    if val is None:
+        return ""
+    try:
+        if pd.isna(val):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    s = str(val).strip()
+    if s.lower() in ("", "nan", "none", "nat", "null", "<na>"):
+        return ""
+    if s.endswith(".0"):
+        head = s[:-2]
+        if head.isdigit():
+            return head
+    return s
+
+
+def _preorder_qty_sum(series):
+    if series is None or len(series) == 0:
+        return 0
+    total = float(pd.to_numeric(series, errors="coerce").fillna(0).sum())
+    if total.is_integer():
+        return int(total)
+    return total
+
+
+def _preorder_limit_value(val):
+    n = pd.to_numeric(val, errors="coerce")
+    if pd.isna(n):
+        return None
+    n = float(n)
+    if n.is_integer():
+        return int(n)
+    return n
+
+
+def preorder_match_sku(inventory_sku, product_sku=None):
+    """對活動用庫存SKU；空白才改用商品SKU。"""
+    inv = _preorder_text(inventory_sku)
+    if inv:
+        return inv
+    return _preorder_text(product_sku)
+
+
+def is_preorder_cod_pay_method(pay_method):
+    text = _preorder_text(pay_method).lower()
+    return any(marker in text for marker in PREORDER_COD_PAY_MARKERS)
+
+
+def classify_preorder_pay_bucket(pay_status, pay_method):
+    """Paid／貨到付款 Unpaid／銀行 Unpaid；已取消列請先排除。"""
+    status = _preorder_text(pay_status)
+    if status == PREORDER_PAID_STATUS:
+        return PREORDER_BUCKET_PAID
+    if status == PREORDER_UNPAID_STATUS:
+        if is_preorder_cod_pay_method(pay_method):
+            return PREORDER_BUCKET_COD_UNPAID
+        return PREORDER_BUCKET_BANK_UNPAID
+    return ""
+
+
+def preorder_line_view(df):
+    if df is None or df.empty:
+        return pd.DataFrame(columns=list(PREORDER_ORDERS_LINE_COLUMNS))
+    sku_series = df["對帳SKU"] if "對帳SKU" in df.columns else df.get("庫存SKU")
+    out = pd.DataFrame({
+        "訂單編號": df["訂單編號"].map(_preorder_text) if "訂單編號" in df.columns else "",
+        "SKU": pd.Series(sku_series).map(_preorder_text) if sku_series is not None else "",
+        "商品數量": pd.to_numeric(df["商品數量"], errors="coerce").fillna(0) if "商品數量" in df.columns else 0,
+        "付款方式": df["付款方式"].map(_preorder_text) if "付款方式" in df.columns else "",
+        "付款狀態": df["付款狀態"].map(_preorder_text) if "付款狀態" in df.columns else "",
+        "訂單狀態": df["訂單狀態"].map(_preorder_text) if "訂單狀態" in df.columns else "",
+    })
+    return out[list(PREORDER_ORDERS_LINE_COLUMNS)].reset_index(drop=True)
+
+
+def prepare_preorder_orders_df(df):
+    """清洗 All Orders：對帳SKU、件數、已取消、三欄。不過濾商城。"""
+    if df is None:
+        out = pd.DataFrame(columns=list(PREORDER_ORDERS_REQUIRED_COLUMNS))
+    else:
+        out = df.copy()
+        out.columns = out.columns.astype(str).str.strip()
+    missing = [c for c in PREORDER_ORDERS_REQUIRED_COLUMNS if c not in out.columns]
+    if missing:
+        if len(out):
+            raise ValueError("Orders 缺少欄位：" + "、".join(missing))
+        for col in missing:
+            out[col] = pd.Series(dtype=str)
+    out["對帳SKU"] = [
+        preorder_match_sku(inv, prod)
+        for inv, prod in zip(out["庫存SKU"], out["商品SKU"])
+    ]
+    out["商品數量"] = pd.to_numeric(out["商品數量"], errors="coerce").fillna(0)
+    out["已取消"] = out["訂單狀態"].map(_preorder_text) == PREORDER_CANCELLED_STATUS
+    out["三欄"] = [
+        "" if cancelled else classify_preorder_pay_bucket(status, method)
+        for status, method, cancelled in zip(out["付款狀態"], out["付款方式"], out["已取消"])
+    ]
+    return out
+
+
+def read_preorder_orders_table(file_bytes, filename="orders.xlsx"):
+    df = read_tabular_file(file_bytes, filename)
+    return prepare_preorder_orders_df(df)
+
+
+def _preorder_orders_drive_meta():
+    drive = {"ok": False, "name": None, "modified": None, "id": None, "reason": None}
+    try:
+        _, latest = pick_latest_source("preorder_orders")
+        if latest:
+            return {
+                "ok": True,
+                "name": latest.get("name"),
+                "modified": latest.get("modifiedTime"),
+                "id": latest.get("id"),
+                "reason": None,
+            }
+        drive["reason"] = "找不到 Orders_DD-MM-YYYY-*.xlsx"
+    except Exception as e:
+        drive["reason"] = _status_error_text(e)
+    return drive
+
+
+def load_preorder_orders(local_bytes=None, local_name=None, drive=None):
+    """讀最新 Drive Orders，或本機上傳預覽。本機檔不會寫入 Drive。"""
+    if drive is None:
+        drive = _preorder_orders_drive_meta()
+
+    if local_bytes:
+        try:
+            orders = read_preorder_orders_table(local_bytes, local_name or "orders.xlsx")
+        except Exception as e:
+            return {
+                "ok": False,
+                "reason": str(e),
+                "preview": True,
+                "source": "local",
+                "name": local_name,
+                "drive": drive,
+            }
+        return {
+            "ok": True,
+            "preview": True,
+            "source": "local",
+            "name": local_name or "本機上傳",
+            "modified": None,
+            "orders": orders,
+            "drive": drive,
+        }
+
+    if not drive.get("ok"):
+        return {
+            "ok": False,
+            "reason": drive.get("reason") or "找不到 Orders_DD-MM-YYYY-*.xlsx",
+            "preview": False,
+            "source": "drive",
+            "drive": drive,
+        }
+    try:
+        payload = get_cached_gdrive_file_bytes(drive["id"])
+        orders = read_preorder_orders_table(payload, drive.get("name") or "orders.xlsx")
+    except Exception as e:
+        return {
+            "ok": False,
+            "reason": _status_error_text(e),
+            "preview": False,
+            "source": "drive",
+            "name": drive.get("name"),
+            "modified": drive.get("modified"),
+            "drive": drive,
+        }
+    return {
+        "ok": True,
+        "preview": False,
+        "source": "drive",
+        "name": drive.get("name"),
+        "modified": drive.get("modified"),
+        "id": drive.get("id"),
+        "orders": orders,
+        "drive": drive,
+    }
+
+
+def build_preorder_board(campaign_df, orders_df):
+    """依活動 SKU 計未取消件數，拆 Paid／貨到付款 Unpaid／銀行 Unpaid，並對上限。"""
+    campaign = ensure_preorder_campaign_df(campaign_df)
+    if orders_df is None:
+        orders = prepare_preorder_orders_df(None)
+    elif "對帳SKU" not in orders_df.columns:
+        orders = prepare_preorder_orders_df(orders_df)
+    else:
+        orders = orders_df
+
+    summary_rows = []
+    campaigns = []
+    for _, camp in campaign.iterrows():
+        sku = _preorder_text(camp.get("SKU"))
+        limit = _preorder_limit_value(camp.get("上限"))
+        name = _preorder_text(camp.get("品名"))
+        month = _preorder_text(camp.get("月份"))
+        if sku and len(orders):
+            lines = orders.loc[orders["對帳SKU"] == sku].copy()
+        else:
+            lines = orders.iloc[0:0].copy()
+        accepted = lines.loc[~lines["已取消"]].copy() if "已取消" in lines.columns else lines
+        accepted_qty = _preorder_qty_sum(accepted["商品數量"]) if len(accepted) else 0
+
+        def _bucket_qty(key):
+            if not len(accepted):
+                return 0
+            return _preorder_qty_sum(accepted.loc[accepted["三欄"] == key, "商品數量"])
+
+        def _bucket_lines(key):
+            if not len(accepted):
+                return preorder_line_view(None)
+            return preorder_line_view(accepted.loc[accepted["三欄"] == key])
+
+        paid_qty = _bucket_qty(PREORDER_BUCKET_PAID)
+        cod_qty = _bucket_qty(PREORDER_BUCKET_COD_UNPAID)
+        bank_qty = _bucket_qty(PREORDER_BUCKET_BANK_UNPAID)
+        over = limit is not None and accepted_qty >= limit
+        summary_rows.append({
+            "月份": month,
+            "SKU": sku,
+            "品名": name,
+            "已接單": accepted_qty,
+            "上限": "" if limit is None else limit,
+            "Paid 件數": paid_qty,
+            "貨到付款 Unpaid 件數": cod_qty,
+            "銀行 Unpaid 件數": bank_qty,
+            "達上限": "是" if over else "",
+        })
+        campaigns.append({
+            "month": month,
+            "sku": sku,
+            "name": name,
+            "accepted_qty": accepted_qty,
+            "limit": limit,
+            "limit_label": "—" if limit is None else str(limit),
+            "over_limit": over,
+            "paid_qty": paid_qty,
+            "cod_unpaid_qty": cod_qty,
+            "bank_unpaid_qty": bank_qty,
+            "paid_lines": _bucket_lines(PREORDER_BUCKET_PAID),
+            "cod_unpaid_lines": _bucket_lines(PREORDER_BUCKET_COD_UNPAID),
+            "bank_unpaid_lines": _bucket_lines(PREORDER_BUCKET_BANK_UNPAID),
+        })
+
+    summary = pd.DataFrame(summary_rows)
+    summary = ensure_columns(summary, PREORDER_BOARD_COLUMNS)
+    over_skus = [c["sku"] or "（未填 SKU）" for c in campaigns if c["over_limit"]]
+    return {"summary": summary, "campaigns": campaigns, "over_limit_skus": over_skus}
 
 
 def fill_sitegiant_upc(df_sg, df_shopee_list):
