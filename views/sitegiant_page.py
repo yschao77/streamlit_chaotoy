@@ -119,13 +119,15 @@ def _render_preorder_orders_board(campaign_df):
         if loaded_orders.get("modified")
         else "（本機）"
     )
+    orders_df = loaded_orders.get("orders")
+    order_n = 0 if orders_df is None else len(orders_df)
     st.caption(
         f"看板來源：{source_label} `{loaded_orders.get('name')}`　"
         f"最後修改：`{modified_label}`　"
-        f"列數：`{len(loaded_orders.get('orders') or [])}`"
+        f"列數：`{order_n}`"
     )
 
-    board = build_preorder_board(campaign_df, loaded_orders.get("orders"))
+    board = build_preorder_board(campaign_df, orders_df)
     if board["summary"].empty:
         st.info("活動表沒有列，看板為空。請先在上方新增活動 SKU。")
         return
