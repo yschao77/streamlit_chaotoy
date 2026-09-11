@@ -60,6 +60,7 @@
 - [查詢入庫紀錄](pages/12-inward-query.md)
 - [Sitegiant 批量新增UPC](pages/04-sitegiant-upc.md)
 - [採購單待處理](pages/05-pending-po.md)
+- [預購追蹤](pages/13-preorder-tracker.md)
 
 ### 商品蝦皮麗嬰統整管理
 

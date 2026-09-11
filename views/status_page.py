@@ -15,7 +15,7 @@ def render(sub_page, cfg):
     st.write("---")
 
     st.caption(
-        f"監看 Drive 各來源最新檔與台北時間。未接入流程的蝦皮資料夾只顯示狀態、不會寫入主表。"
+        f"監看 Drive 各來源最新檔與台北時間。未接入流程的資料夾只顯示狀態、不會寫入主表。"
         f" 現在（台北）：`{taipei_now().strftime('%Y-%m-%d %H:%M:%S')}`"
     )
     if cfg.get("TIME_MASTER"):

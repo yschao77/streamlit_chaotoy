@@ -25,7 +25,9 @@
 | 已接入流程 | 入庫、三表整合、蝦皮校正、UPC 會用到 |
 | 僅監看 | 例如蝦皮媒體、標題描述、配送、未上架；不會寫入主表 |
 
-已接入的來源包括：麗嬰總表、商品列表、蝦皮賣場列表、價格統整表、Sitegiant UPC、Sitegiant BasicInfo、蝦皮價格及庫存（mass_update）。
+已接入的來源包括：麗嬰總表、商品列表、蝦皮賣場列表、價格統整表、Sitegiant UPC、Sitegiant BasicInfo、蝦皮價格及庫存（mass_update）、預購追蹤.xlsx。
+
+「僅監看」另含蝦皮媒體／標題描述／配送／未上架，以及 `Sitegiant_Preorder_Orders`、Import Restock 官方殼。
 
 頁面下方會顯示「已接入 N 個來源，僅監看 M 個」。
 
@@ -38,6 +40,8 @@
 - `batch_edit_item_upc_assignment_all_DD-MM-YYYY-*.xlsx`（或 zip）
 - `batch_edit_basic_info_all_DD-MM-YYYY-*.xlsx`（或 zip）
 - `mass_update_sales_info_3062950_YYYYMMDD*.xlsx`
+- `預購追蹤.xlsx`
+- `Orders_DD-MM-YYYY-*.xlsx`
 
 ## 常見問題
 

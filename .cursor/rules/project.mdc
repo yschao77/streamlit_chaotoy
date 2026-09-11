@@ -11,7 +11,7 @@ Streamlit 進銷存工具：「麗嬰與蝦皮商務數據情報中心」。資�
 
 - `app.py`：`page_config`、側邊欄路由；把 `gdrive_cfg` / 檔案 ID 傳給子頁
 - `utils.py`：Drive I/O、來源目錄 `TRACKED_SOURCES`、條碼清洗、主表/蝦皮 xlsm 讀寫的**唯一實作**
-- `views/sitegiant_page.py`：Sitegiant 入庫轉換、歷史入庫、批量 UPC
+- `views/sitegiant_page.py`：Sitegiant 入庫轉換、歷史入庫、批量 UPC、預購追蹤
 - `views/integration_page.py`：麗嬰/蝦皮/內部商品三表整合與審核
 - `views/status_page.py`：各雲端試算表最新修改時間
 - `temp/`：舊版 `app_*.py` 快照，**只讀、禁止修改或當實作來源**

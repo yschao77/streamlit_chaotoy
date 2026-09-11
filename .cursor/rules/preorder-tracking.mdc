@@ -1,0 +1,12 @@
+---
+description: 預購追蹤、結單、到貨催款、現貨上架、廠商預購單、綠界貨到付款
+alwaysApply: false
+---
+
+# 預購追蹤（streamlit_chaotoy）
+
+- 不接 SiteGiant Open API、不接綠界 API。Excel／Drive 進出；綠界金流／物流只在 SiteGiant 後台開。
+- 新子頁掛 Sitegiant 模組；邏輯放 `utils.py`，畫面放 `views/`。`預購追蹤.xlsx` 須先手動建檔再覆寫（禁止 API 新建）。
+- 看板三欄：Paid 可打單；貨到付款 Unpaid 可打單、不催款；銀行 Unpaid 催款後才打單。
+- 廠商單：結單後才鎖定 `自購 + min(客戶量, 上限)`。入庫分配第一版在 SiteGiant 人工做。
+- 每天看狀態用 Drive 表；操作用 Streamlit Cloud＋既有 Actions 喚醒。不要為看板去租主機。

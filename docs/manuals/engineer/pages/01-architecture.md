@@ -26,7 +26,7 @@
 | 側邊欄模組 | 檔案 | 子頁 |
 |------------|------|------|
 | 雲端資料狀態 | `views/status_page.py` | 各表最新修改時間 |
-| Sitegiant 電商整合管理 | `views/sitegiant_page.py` | 入庫轉換、歷史入庫、查詢入庫、批量 UPC、待處理 |
+| Sitegiant 電商整合管理 | `views/sitegiant_page.py` | 入庫轉換、歷史入庫、查詢入庫、批量 UPC、待處理、預購追蹤 |
 | 商品蝦皮麗嬰統整管理 | `views/integration_page.py` | 三表整合、麗嬰合併審核、蝦皮轉換、歷史／查詢 |
 
 新子頁：先在 `app.py` 的 `radio` 加字串，再在對應 `views/*.py` 加 `if sub_page == "..."`。字串必須完全一致。

@@ -87,8 +87,39 @@ ID_SHOPEE_UNPUBLISHED_FOLDER = "1pVqpUUHl9RlKL-1wlje4VMP2DkEUStXk"
 ID_DOWNLOAD_ROOT = "1U0tRNz1j62ouKwtT9s-OlrtmBQGlQ5bU"
 ID_PRICE_SUMMARY_FALLBACK = "1d2a6D6-9LV6oBhlwXjb_9xm5TYN80sPd"
 ID_HISTORY_INWARD_INDEX = "12YbAlXcOdM3lFYFkh7a82yZZe7KotRNe"
+ID_PREORDER_ORDERS_FOLDER = "1EcYJDunuZ4owMds_3O7ryeVlOfM9s3x8"
+ID_PREORDER_TRACKER = "1aqfHIPvavWZhtLZMdFCOnyHtllHLrca-"
+ID_SG_RESTOCK_TEMPLATE = "1QZ-_PI3T2BtHjTwmrIAEG_RZKDlxhpqt"
 UPC_FILLED_FILENAME = "batch_edit_upc_added_only.xlsx"
 HISTORY_INWARD_INDEX_NAME = "入庫明細索引.xlsx"
+PREORDER_TRACKER_NAME = "預購追蹤.xlsx"
+PREORDER_CAMPAIGN_SHEET = "活動"
+PREORDER_VENDOR_HISTORY_SHEET = "廠商單歷史"
+PREORDER_CAMPAIGN_COLUMNS = (
+    "月份",
+    "結單日",
+    "SKU",
+    "條碼",
+    "品名",
+    "自購",
+    "上限",
+    "私密連結",
+    "預計關閉",
+    "實際關閉",
+)
+PREORDER_VENDOR_HISTORY_COLUMNS = (
+    "活動月份",
+    "SKU",
+    "條碼",
+    "自購",
+    "客戶量",
+    "上限",
+    "鎖定數量",
+    "鎖定時間",
+    "備註",
+)
+XLSX_OOXML_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+GOOGLE_SHEETS_MIME = "application/vnd.google-apps.spreadsheet"
 FOLDER_MIME_QUERY = "mimeType = 'application/vnd.google-apps.folder'"
 YEAR_OR_YYMM_FOLDER_RE = re.compile(r"^\d{4}$")
 INWARD_FILENAME_RE = re.compile(
@@ -214,6 +245,38 @@ TRACKED_SOURCES = (
         "name_contains": "mass_republish_items_3062950",
         "kind": "ymd_hms",
         "pattern": "mass_republish_items_3062950_YYYYMMDDHHMMSS.xlsx",
+        "include_zip": False,
+        "consumed": False,
+    },
+    {
+        "key": "preorder_orders",
+        "folder": "Sitegiant_Preorder_Orders",
+        "folder_id": ID_PREORDER_ORDERS_FOLDER,
+        "name_contains": "Orders_",
+        "kind": "dmy",
+        "pattern": "Orders_DD-MM-YYYY-*.xlsx",
+        "include_zip": False,
+        "consumed": False,
+    },
+    {
+        "key": "preorder_tracker",
+        "folder": "預購追蹤",
+        "folder_id": ID_PREORDER_ORDERS_FOLDER,
+        "file_id": ID_PREORDER_TRACKER,
+        "name_contains": "預購追蹤",
+        "kind": "file_id",
+        "pattern": "預購追蹤.xlsx",
+        "include_zip": False,
+        "consumed": True,
+    },
+    {
+        "key": "sg_restock_template",
+        "folder": "SiteGiant Import Restock 殼",
+        "folder_id": ID_PREORDER_ORDERS_FOLDER,
+        "file_id": ID_SG_RESTOCK_TEMPLATE,
+        "name_contains": "",
+        "kind": "file_id",
+        "pattern": "Import Restock 官方空殼（只讀）",
         "include_zip": False,
         "consumed": False,
     },
@@ -930,6 +993,14 @@ def download_gdrive_file_to_bytes(file_id):
     file_stream.seek(0)
     return file_stream
 
+
+def get_gdrive_file_meta(file_id):
+    return get_drive_service().files().get(
+        fileId=file_id,
+        fields="id,name,modifiedTime,mimeType,size,trashed",
+        supportsAllDrives=True,
+    ).execute()
+
 @st.cache_data(ttl=600, show_spinner="☁️ 正在從雲端載入檔案...")
 def get_cached_gdrive_file_bytes(file_id):
     file_stream = download_gdrive_file_to_bytes(file_id)
@@ -1398,19 +1469,27 @@ def collect_tracked_file_status():
             "最後修改（台北）": "❌ 雲端檔案尚未建立/不存在",
         }
         try:
-            files = _list_gdrive_files_raw(
-                src["folder_id"],
-                name_contains=src["name_contains"],
-                include_zip=bool(src.get("include_zip")),
-            )
-            if src["kind"] == "keyword":
-                files.sort(key=lambda x: x.get("modifiedTime") or "", reverse=True)
-                latest = files[0] if files else None
+            if src.get("file_id"):
+                meta = get_gdrive_file_meta(src["file_id"])
+                if meta.get("trashed"):
+                    row["最新檔名"] = "（已在垃圾桶）"
+                else:
+                    row["最新檔名"] = meta.get("name") or "（無）"
+                    row["最後修改（台北）"] = format_gdrive_time(meta.get("modifiedTime"))
             else:
-                latest = _rank_latest_file(files, src["kind"])
-            if latest:
-                row["最新檔名"] = latest.get("name") or "（無）"
-                row["最後修改（台北）"] = format_gdrive_time(latest.get("modifiedTime"))
+                files = _list_gdrive_files_raw(
+                    src["folder_id"],
+                    name_contains=src["name_contains"],
+                    include_zip=bool(src.get("include_zip")),
+                )
+                if src["kind"] == "keyword":
+                    files.sort(key=lambda x: x.get("modifiedTime") or "", reverse=True)
+                    latest = files[0] if files else None
+                else:
+                    latest = _rank_latest_file(files, src["kind"])
+                if latest:
+                    row["最新檔名"] = latest.get("name") or "（無）"
+                    row["最後修改（台北）"] = format_gdrive_time(latest.get("modifiedTime"))
         except Exception as e:
             row["最新檔名"] = "讀取失敗"
             row["最後修改（台北）"] = _status_error_text(e)
@@ -1430,6 +1509,163 @@ def format_status_markdown(rows):
             f"| {r['資料夾']} | {r['用途']} | {r['最後修改（台北）']} | `{r['格式']}` | `{r['最新檔名']}` |"
         )
     return "\n".join(lines)
+
+
+def _is_blank_table(df):
+    if df is None or df.empty:
+        return True
+    work = df.dropna(how="all")
+    if work.empty:
+        return True
+    for col in work.columns:
+        series = work[col].astype(str).str.strip()
+        series = series[~series.str.lower().isin(("", "nan", "none"))]
+        if len(series):
+            return False
+    return True
+
+
+def ensure_columns(df, columns):
+    if df is None:
+        return pd.DataFrame(columns=list(columns))
+    out = df.copy()
+    out.columns = out.columns.astype(str).str.strip()
+    for col in columns:
+        if col not in out.columns:
+            out[col] = ""
+    extras = [c for c in out.columns if c not in columns]
+    return out[list(columns) + extras]
+
+
+def ensure_preorder_campaign_df(df):
+    out = ensure_columns(df, PREORDER_CAMPAIGN_COLUMNS)
+    if "條碼" in out.columns:
+        out["條碼"] = out["條碼"].map(clean_barcode)
+    for col in ("自購", "上限"):
+        if col in out.columns:
+            out[col] = pd.to_numeric(out[col], errors="coerce")
+    return out
+
+
+def ensure_preorder_vendor_history_df(df):
+    return ensure_columns(df, PREORDER_VENDOR_HISTORY_COLUMNS)
+
+
+def _preorder_tracker_not_xlsx_reason(mime, name):
+    mime = mime or ""
+    name = (name or "").lower()
+    if mime == GOOGLE_SHEETS_MIME:
+        return "預購追蹤必須是 Excel（.xlsx），請不要用 Google 試算表原生檔。"
+    if mime and mime != XLSX_OOXML_MIME and not name.endswith(".xlsx"):
+        return f"預購追蹤檔不是 xlsx（mime={mime}）。"
+    return None
+
+
+def probe_sg_restock_template():
+    """只讀官方 Import Restock 空殼；禁止寫回此 file id。"""
+    try:
+        meta = get_gdrive_file_meta(ID_SG_RESTOCK_TEMPLATE)
+        if meta.get("trashed"):
+            return {"ok": False, "reason": "Import Restock 空殼在垃圾桶。"}
+        payload = get_cached_gdrive_file_bytes(ID_SG_RESTOCK_TEMPLATE)
+        return {
+            "ok": True,
+            "id": meta.get("id"),
+            "name": meta.get("name") or "import_restock.xlsx",
+            "mime": meta.get("mimeType") or "",
+            "modified": meta.get("modifiedTime"),
+            "nbytes": len(payload or b""),
+            "bytes": payload,
+        }
+    except Exception as e:
+        return {"ok": False, "reason": _status_error_text(e)}
+
+
+def load_preorder_tracker():
+    """讀既有預購追蹤.xlsx；沒有活動表或表是空的就補約定欄，不新建雲端檔。"""
+    try:
+        meta = get_gdrive_file_meta(ID_PREORDER_TRACKER)
+    except Exception as e:
+        return {"ok": False, "reason": _status_error_text(e)}
+    if meta.get("trashed"):
+        return {"ok": False, "reason": "預購追蹤檔在垃圾桶。"}
+    name = meta.get("name") or PREORDER_TRACKER_NAME
+    bad = _preorder_tracker_not_xlsx_reason(meta.get("mimeType"), name)
+    if bad:
+        return {"ok": False, "reason": bad, "name": name}
+    try:
+        payload = get_cached_gdrive_file_bytes(ID_PREORDER_TRACKER)
+        xls = pd.ExcelFile(io.BytesIO(payload))
+        sheets = {}
+        for sheet_name in xls.sheet_names:
+            sheets[sheet_name] = pd.read_excel(xls, sheet_name=sheet_name, dtype=str)
+    except Exception as e:
+        return {"ok": False, "reason": _status_error_text(e), "name": name}
+
+    if PREORDER_CAMPAIGN_SHEET in sheets:
+        campaign = sheets[PREORDER_CAMPAIGN_SHEET]
+        leftover = {k: v for k, v in sheets.items() if k != PREORDER_CAMPAIGN_SHEET}
+    elif len(sheets) == 1:
+        only_name, only_df = next(iter(sheets.items()))
+        if _is_blank_table(only_df) or str(only_name).lower() in ("sheet1", "工作表1", "worksheet"):
+            campaign = pd.DataFrame(columns=list(PREORDER_CAMPAIGN_COLUMNS))
+            leftover = {}
+        else:
+            campaign = only_df
+            leftover = {}
+    else:
+        campaign = pd.DataFrame(columns=list(PREORDER_CAMPAIGN_COLUMNS))
+        leftover = dict(sheets)
+
+    campaign = ensure_preorder_campaign_df(campaign)
+    vendor_hist = ensure_preorder_vendor_history_df(leftover.pop(PREORDER_VENDOR_HISTORY_SHEET, None))
+    others = leftover
+    return {
+        "ok": True,
+        "name": name,
+        "modified": meta.get("modifiedTime"),
+        "campaign": campaign,
+        "vendor_history": vendor_hist,
+        "other_sheets": others,
+    }
+
+
+def preorder_tracker_bytes(campaign_df, vendor_history_df=None, other_sheets=None):
+    campaign = ensure_preorder_campaign_df(campaign_df)
+    vendor_hist = ensure_preorder_vendor_history_df(vendor_history_df)
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        campaign.to_excel(writer, index=False, sheet_name=PREORDER_CAMPAIGN_SHEET)
+        vendor_hist.to_excel(writer, index=False, sheet_name=PREORDER_VENDOR_HISTORY_SHEET)
+        for sheet_name, df in (other_sheets or {}).items():
+            safe = str(sheet_name or "其他")[:31]
+            if safe in (PREORDER_CAMPAIGN_SHEET, PREORDER_VENDOR_HISTORY_SHEET):
+                continue
+            (df if df is not None else pd.DataFrame()).to_excel(writer, index=False, sheet_name=safe)
+        ws = writer.sheets[PREORDER_CAMPAIGN_SHEET]
+        if "條碼" in campaign.columns:
+            col_idx = list(campaign.columns).index("條碼") + 1
+            for row_idx in range(2, len(campaign) + 2):
+                ws.cell(row=row_idx, column=col_idx).number_format = "@"
+    return buf.getvalue()
+
+
+def save_preorder_tracker(campaign_df, vendor_history_df=None, other_sheets=None, file_name=None):
+    if not ID_PREORDER_TRACKER:
+        return {"ok": False, "reason": "未設定預購追蹤檔 ID。"}
+    payload = preorder_tracker_bytes(campaign_df, vendor_history_df, other_sheets)
+    try:
+        upload_or_update_gdrive_file(
+            ID_PREORDER_ORDERS_FOLDER,
+            file_name or PREORDER_TRACKER_NAME,
+            payload,
+            existing_file_id=ID_PREORDER_TRACKER,
+            allow_create=False,
+        )
+    except Exception as e:
+        return {"ok": False, "reason": _status_error_text(e)}
+    get_cached_gdrive_file_bytes.clear()
+    return {"ok": True, "bytes": payload, "name": file_name or PREORDER_TRACKER_NAME}
 
 
 def fill_sitegiant_upc(df_sg, df_shopee_list):

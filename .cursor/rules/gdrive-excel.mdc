@@ -18,6 +18,9 @@ alwaysApply: false
 | `ID_SITEGIANT_UPC_FOLDER` | `batch_edit_item_upc_assignment_all_DD-MM-YYYY-*.xlsx`（或同名 zip） |
 | `ID_SITEGIANT_BATCH_FOLDER` | `batch_edit_basic_info_all_DD-MM-YYYY-*.xlsx`（或同名 zip） |
 | `ID_SHOPEE_MASS_UPDATE_FOLDER` | `mass_update_sales_info_3062950_YYYYMMDD*.xlsx` |
+| `ID_PREORDER_ORDERS_FOLDER` | `Orders_DD-MM-YYYY-*.xlsx` |
+| `ID_PREORDER_TRACKER` | `預購追蹤.xlsx`（只覆寫此 file id） |
+| `ID_SG_RESTOCK_TEMPLATE` | Import Restock 官方空殼（只讀，禁止 update） |
 
 ## 讀寫引擎
 

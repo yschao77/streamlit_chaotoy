@@ -42,6 +42,7 @@ df["條碼"] = df["條碼"].map(clean_barcode)
 | 統整表無法回寫 | 雲端沒有既有主檔；API 不新建 |
 | 歷史入庫只下載不覆寫 | 月份資料夾沒有同名檔 |
 | 入庫索引未寫回 | `ID_HISTORY_INWARD_INDEX` 無效，或 service account 沒有該檔編輯權 |
+| 預購追蹤讀寫失敗 | `ID_PREORDER_TRACKER` 權限或檔不是 xlsx；Restock 空殼只有檢視權即可 |
 | 查詢入庫看不到單 | 檔在本機未上傳，或不在 `YYYY/YYMM` |
 | UPC 填補 0 筆 | 蝦皮列表空或沒有效 GTIN；SKU 對不上 |
 | 重複匯入被拒 | md5 已在「匯入檔案」或「已處理採購單」 |

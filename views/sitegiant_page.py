@@ -35,6 +35,11 @@ from utils import (
     load_history_inward_index,
     refresh_history_inward_index,
     invalidate_history_inward_caches,
+    load_preorder_tracker,
+    save_preorder_tracker,
+    probe_sg_restock_template,
+    preorder_tracker_bytes,
+    PREORDER_TRACKER_NAME,
 )
 
 def _inward_excel_bytes(df, sheet_name="SiteGiant入庫單"):
@@ -885,3 +890,105 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
                         
             except Exception as e:
                 st.error(f"❌ 讀取雲端清單失敗，可能是該檔案尚未被系統自動建立或權限不足。")
+
+    elif sub_page == "🗓️ 預購追蹤":
+        st.subheader("🗓️ 預購活動表（第1階）")
+        st.info(
+            "此階只讀寫雲端 `預購追蹤.xlsx` 的活動欄。訂單三欄看板、結單兩檔尚未開放。"
+            " 寫回只覆寫既有檔，不會新建。Import Restock 空殼只讀、不會被蓋掉。"
+        )
+
+        restock = probe_sg_restock_template()
+        if restock.get("ok"):
+            st.success(
+                f"Import Restock 空殼可下載：`{restock.get('name')}`"
+                f"（{restock.get('nbytes', 0)} bytes，未寫回此檔）"
+            )
+            st.download_button(
+                label="📥 本機下載官方 Restock 空殼（不會改雲端）",
+                data=restock.get("bytes") or b"",
+                file_name=restock.get("name") or "import_restock.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                key="preorder_restock_shell_dl",
+            )
+        else:
+            st.error(f"❌ 無法讀取 Import Restock 空殼：{restock.get('reason') or '未知錯誤'}")
+
+        st.write("---")
+        reload = st.button("🔄 重新載入預購追蹤", use_container_width=True, key="preorder_reload")
+        if reload or "preorder_loaded" not in st.session_state:
+            if reload:
+                get_cached_gdrive_file_bytes.clear()
+                st.session_state.pop("preorder_campaign_editor", None)
+            loaded = load_preorder_tracker()
+            st.session_state["preorder_loaded"] = loaded
+            if loaded.get("ok"):
+                st.session_state["preorder_campaign_df"] = loaded["campaign"]
+                st.session_state["preorder_vendor_history_df"] = loaded["vendor_history"]
+                st.session_state["preorder_other_sheets"] = loaded.get("other_sheets") or {}
+                st.session_state["preorder_tracker_name"] = loaded.get("name") or PREORDER_TRACKER_NAME
+
+        loaded = st.session_state.get("preorder_loaded") or {}
+        if not loaded.get("ok"):
+            st.error(f"❌ 無法載入預購追蹤：{loaded.get('reason') or '未知錯誤'}")
+            st.info("請確認 service account 對該檔有編輯權，且檔案是 .xlsx。")
+            return
+
+        if st.session_state.pop("preorder_save_ok", False):
+            st.success("✅ 已覆寫雲端預購追蹤.xlsx（未新建檔、未改 Restock 空殼）。")
+
+        st.caption(
+            f"雲端檔：`{loaded.get('name')}`　最後修改：`{format_gdrive_time(loaded.get('modified'))}`"
+        )
+        edited = st.data_editor(
+            st.session_state.get("preorder_campaign_df", loaded["campaign"]),
+            num_rows="dynamic",
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "月份": st.column_config.TextColumn("月份", help="YYYY-MM"),
+                "結單日": st.column_config.TextColumn("結單日", help="YYYY-MM-DD"),
+                "SKU": st.column_config.TextColumn("SKU", help="自定義編碼／庫存 SKU"),
+                "條碼": st.column_config.TextColumn("條碼", help="GTIN／c"),
+                "品名": st.column_config.TextColumn("品名"),
+                "自購": st.column_config.NumberColumn("自購", min_value=0, step=1),
+                "上限": st.column_config.NumberColumn("上限", help="客戶預購上限", min_value=0, step=1),
+                "私密連結": st.column_config.TextColumn("私密連結"),
+                "預計關閉": st.column_config.TextColumn("預計關閉", help="預計結單日"),
+                "實際關閉": st.column_config.TextColumn("實際關閉", help="實際關掉接受缺貨的時間"),
+            },
+            key="preorder_campaign_editor",
+        )
+        st.session_state["preorder_campaign_df"] = edited
+
+        save_col, dl_col = st.columns(2)
+        with save_col:
+            if st.button("💾 覆寫雲端預購追蹤", type="primary", use_container_width=True):
+                result = save_preorder_tracker(
+                    edited,
+                    st.session_state.get("preorder_vendor_history_df"),
+                    st.session_state.get("preorder_other_sheets"),
+                    file_name=st.session_state.get("preorder_tracker_name"),
+                )
+                if result.get("ok"):
+                    st.session_state["preorder_save_ok"] = True
+                    get_cached_gdrive_file_bytes.clear()
+                    st.session_state.pop("preorder_loaded", None)
+                    st.rerun()
+                else:
+                    st.error(f"❌ 寫回失敗：{result.get('reason') or '未知錯誤'}")
+        with dl_col:
+            local_bytes = preorder_tracker_bytes(
+                edited,
+                st.session_state.get("preorder_vendor_history_df"),
+                st.session_state.get("preorder_other_sheets"),
+            )
+            st.download_button(
+                label="📥 下載目前活動表（本機）",
+                data=local_bytes,
+                file_name=st.session_state.get("preorder_tracker_name") or PREORDER_TRACKER_NAME,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                key="preorder_tracker_local_dl",
+            )
