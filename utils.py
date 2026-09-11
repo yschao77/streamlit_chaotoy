@@ -1899,6 +1899,11 @@ def build_preorder_board(campaign_df, orders_df):
     else:
         orders = orders_df
 
+    camp_skus = [_preorder_text(v) for v in campaign["SKU"].tolist()] if "SKU" in campaign.columns else []
+    match_n = 0
+    if len(orders) and "對帳SKU" in orders.columns:
+        match_n = int(orders["對帳SKU"].isin([s for s in camp_skus if s]).sum())
+
     summary_rows = []
     campaigns = []
     for _, camp in campaign.iterrows():
@@ -1957,7 +1962,14 @@ def build_preorder_board(campaign_df, orders_df):
     summary = pd.DataFrame(summary_rows)
     summary = ensure_columns(summary, PREORDER_BOARD_COLUMNS)
     over_skus = [c["sku"] or "（未填 SKU）" for c in campaigns if c["over_limit"]]
-    return {"summary": summary, "campaigns": campaigns, "over_limit_skus": over_skus}
+    return {
+        "summary": summary,
+        "campaigns": campaigns,
+        "over_limit_skus": over_skus,
+        "matched_order_rows": match_n,
+        "order_rows": int(len(orders)),
+        "campaign_skus": [s for s in camp_skus if s],
+    }
 
 
 def fill_sitegiant_upc(df_sg, df_shopee_list):

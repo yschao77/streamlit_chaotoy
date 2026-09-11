@@ -39,9 +39,11 @@ from utils import (
     save_preorder_tracker,
     probe_sg_restock_template,
     preorder_tracker_bytes,
+    PREORDER_TRACKER_NAME,
     load_preorder_orders,
     build_preorder_board,
-    PREORDER_TRACKER_NAME,
+    preorder_line_view,
+    _preorder_text,
 )
 
 def _inward_excel_bytes(df, sheet_name="SiteGiant入庫單"):
@@ -127,7 +129,29 @@ def _render_preorder_orders_board(campaign_df):
         f"列數：`{order_n}`"
     )
 
+    preview_df = preorder_line_view(orders_df)
+    with st.expander(f"來源內容（{order_n} 列）", expanded=True):
+        st.dataframe(preview_df, use_container_width=True, hide_index=True)
+        if orders_df is not None and len(orders_df) and "對帳SKU" in orders_df.columns:
+            sku_vc = orders_df["對帳SKU"].map(_preorder_text)
+            sku_vc = sku_vc[sku_vc != ""].value_counts().head(20)
+            if len(sku_vc):
+                st.caption("本檔出現的對帳 SKU（最多 20，填到上方活動表才能進三欄）")
+                st.dataframe(
+                    pd.DataFrame({"SKU": list(sku_vc.index), "列數": [int(v) for v in sku_vc.values]}),
+                    hide_index=True,
+                    use_container_width=True,
+                )
+
     board = build_preorder_board(campaign_df, orders_df)
+    filled_skus = board.get("campaign_skus") or []
+    matched = int(board.get("matched_order_rows") or 0)
+    if order_n and not filled_skus:
+        st.warning("活動表沒有填 SKU，三欄對不到本檔訂單。請把上方 SKU 填成 All Orders 的庫存SKU（本檔對帳 SKU 見來源內容）。")
+    elif order_n and filled_skus and matched == 0:
+        shown = "、".join(f"`{s}`" for s in filled_skus[:8])
+        st.warning(f"活動 SKU（{shown}）對不到本檔任何列，所以三欄件數是 0。")
+
     if board["summary"].empty:
         st.info("活動表沒有列，看板為空。請先在上方新增活動 SKU。")
         return
