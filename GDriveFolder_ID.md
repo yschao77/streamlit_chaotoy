@@ -16,6 +16,8 @@
   - file format: mass_update_basic_info_3062950_YYYYMMDD*.xlsx
 - 蝦皮_配送選項: 1RKIEv0x3G1BCCS6FKEyW1smKCg6SHsXI
   - file format: mass_update_shipping_info_3062950_YYYYMMDD*.xlsx
+- 蝦皮_未上架: 1pVqpUUHl9RlKL-1wlje4VMP2DkEUStXk
+  - file format: mass_republish_items_3062950_20260816231210.xlsx
 - Sitegiant_Preorder_Orders: 1EcYJDunuZ4owMds_3O7ryeVlOfM9s3x8
   - file format: Orders_DD-MM-YYYY-*.xlsx
 - 預購追蹤.xlsx: 1aqfHIPvavWZhtLZMdFCOnyHtllHLrca-
