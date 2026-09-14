@@ -6,8 +6,8 @@ name: Sync Drive sources
 on:
   schedule:
     # 09:15 Taipei. Cron is UTC only and the hour field must be 0-23,
-    # so Taipei time minus 8 hours: 09:15 -> 01:15 UTC.
-    - cron: "15 1 * * *"
+    # so Taipei time minus 8 hours: 10:03 -> 02:03 UTC.
+    - cron: "03 2 * * *"
   workflow_dispatch:
   repository_dispatch:
     types: [sync-drive]
