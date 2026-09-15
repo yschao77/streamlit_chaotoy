@@ -129,11 +129,13 @@ PREORDER_ORDERS_REQUIRED_COLUMNS = (
 )
 PREORDER_ORDERS_LINE_COLUMNS = (
     "訂單編號",
+    "商品名稱",
     "SKU",
     "商品數量",
     "付款方式",
     "付款狀態",
     "訂單狀態",
+    "是預購",
 )
 PREORDER_BOARD_COLUMNS = (
     "月份",
@@ -147,6 +149,7 @@ PREORDER_BOARD_COLUMNS = (
     "達上限",
 )
 PREORDER_CANCELLED_STATUS = "已取消"
+PREORDER_NAME_MARKER = "預購"
 PREORDER_PAID_STATUS = "已付款"
 PREORDER_UNPAID_STATUS = "未付款"
 PREORDER_COD_PAY_MARKERS = ("cash on delivery", "貨到付款", "取貨付款")
@@ -1748,6 +1751,11 @@ def preorder_match_sku(inventory_sku, product_sku=None):
     return _preorder_text(product_sku)
 
 
+def is_preorder_product_name(name):
+    """官網與蝦皮同步進 All Orders 後，只靠商品名稱含「預購」辨識預購列。"""
+    return PREORDER_NAME_MARKER in _preorder_text(name)
+
+
 def is_preorder_cod_pay_method(pay_method):
     text = _preorder_text(pay_method).lower()
     return any(marker in text for marker in PREORDER_COD_PAY_MARKERS)
@@ -1769,19 +1777,27 @@ def preorder_line_view(df):
     if df is None or df.empty:
         return pd.DataFrame(columns=list(PREORDER_ORDERS_LINE_COLUMNS))
     sku_series = df["對帳SKU"] if "對帳SKU" in df.columns else df.get("庫存SKU")
+    if "是預購" in df.columns:
+        flag = df["是預購"].map(lambda v: "是" if bool(v) else "否")
+    elif "商品名稱" in df.columns:
+        flag = df["商品名稱"].map(lambda v: "是" if is_preorder_product_name(v) else "否")
+    else:
+        flag = "否"
     out = pd.DataFrame({
         "訂單編號": df["訂單編號"].map(_preorder_text) if "訂單編號" in df.columns else "",
+        "商品名稱": df["商品名稱"].map(_preorder_text) if "商品名稱" in df.columns else "",
         "SKU": pd.Series(sku_series).map(_preorder_text) if sku_series is not None else "",
         "商品數量": pd.to_numeric(df["商品數量"], errors="coerce").fillna(0) if "商品數量" in df.columns else 0,
         "付款方式": df["付款方式"].map(_preorder_text) if "付款方式" in df.columns else "",
         "付款狀態": df["付款狀態"].map(_preorder_text) if "付款狀態" in df.columns else "",
         "訂單狀態": df["訂單狀態"].map(_preorder_text) if "訂單狀態" in df.columns else "",
+        "是預購": flag,
     })
     return out[list(PREORDER_ORDERS_LINE_COLUMNS)].reset_index(drop=True)
 
 
 def prepare_preorder_orders_df(df):
-    """清洗 All Orders：對帳SKU、件數、已取消、三欄。不過濾商城。"""
+    """清洗 All Orders：對帳SKU、是否預購、件數、已取消、三欄。不過濾商城。"""
     if df is None:
         out = pd.DataFrame(columns=list(PREORDER_ORDERS_REQUIRED_COLUMNS))
     else:
@@ -1793,10 +1809,13 @@ def prepare_preorder_orders_df(df):
             raise ValueError("Orders 缺少欄位：" + "、".join(missing))
         for col in missing:
             out[col] = pd.Series(dtype=str)
+    if "商品名稱" not in out.columns:
+        out["商品名稱"] = ""
     out["對帳SKU"] = [
         preorder_match_sku(inv, prod)
         for inv, prod in zip(out["庫存SKU"], out["商品SKU"])
     ]
+    out["是預購"] = out["商品名稱"].map(is_preorder_product_name)
     out["商品數量"] = pd.to_numeric(out["商品數量"], errors="coerce").fillna(0)
     out["已取消"] = out["訂單狀態"].map(_preorder_text) == PREORDER_CANCELLED_STATUS
     out["三欄"] = [
@@ -1890,19 +1909,24 @@ def load_preorder_orders(local_bytes=None, local_name=None, drive=None):
 
 
 def build_preorder_board(campaign_df, orders_df):
-    """依活動 SKU 計未取消件數，拆 Paid／貨到付款 Unpaid／銀行 Unpaid，並對上限。"""
+    """依活動 SKU 計名稱含「預購」且未取消的件數，拆三欄並對上限。"""
     campaign = ensure_preorder_campaign_df(campaign_df)
     if orders_df is None:
         orders = prepare_preorder_orders_df(None)
-    elif "對帳SKU" not in orders_df.columns:
+    elif "對帳SKU" not in orders_df.columns or "是預購" not in orders_df.columns:
         orders = prepare_preorder_orders_df(orders_df)
     else:
         orders = orders_df
 
+    if "是預購" in orders.columns:
+        board_orders = orders.loc[orders["是預購"]].copy()
+    else:
+        board_orders = orders.iloc[0:0].copy()
+
     camp_skus = [_preorder_text(v) for v in campaign["SKU"].tolist()] if "SKU" in campaign.columns else []
     match_n = 0
-    if len(orders) and "對帳SKU" in orders.columns:
-        match_n = int(orders["對帳SKU"].isin([s for s in camp_skus if s]).sum())
+    if len(board_orders) and "對帳SKU" in board_orders.columns:
+        match_n = int(board_orders["對帳SKU"].isin([s for s in camp_skus if s]).sum())
 
     summary_rows = []
     campaigns = []
@@ -1911,10 +1935,10 @@ def build_preorder_board(campaign_df, orders_df):
         limit = _preorder_limit_value(camp.get("上限"))
         name = _preorder_text(camp.get("品名"))
         month = _preorder_text(camp.get("月份"))
-        if sku and len(orders):
-            lines = orders.loc[orders["對帳SKU"] == sku].copy()
+        if sku and len(board_orders):
+            lines = board_orders.loc[board_orders["對帳SKU"] == sku].copy()
         else:
-            lines = orders.iloc[0:0].copy()
+            lines = board_orders.iloc[0:0].copy()
         accepted = lines.loc[~lines["已取消"]].copy() if "已取消" in lines.columns else lines
         accepted_qty = _preorder_qty_sum(accepted["商品數量"]) if len(accepted) else 0
 
@@ -1968,6 +1992,7 @@ def build_preorder_board(campaign_df, orders_df):
         "over_limit_skus": over_skus,
         "matched_order_rows": match_n,
         "order_rows": int(len(orders)),
+        "preorder_rows": int(len(board_orders)),
         "campaign_skus": [s for s in camp_skus if s],
     }
 

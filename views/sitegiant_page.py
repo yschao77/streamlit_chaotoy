@@ -56,8 +56,9 @@ def _inward_excel_bytes(df, sheet_name="SiteGiant入庫單"):
 def _render_preorder_orders_board(campaign_df):
     st.subheader("📦 訂單三欄看板（第2階）")
     st.info(
-        "依活動 **SKU** 對 All Orders 的 **庫存SKU**（空白才改用商品SKU）。"
-        "不過濾商城。`已取消` 不算進已接單與三欄；件數用 **商品數量**。"
+        "只計 **商品名稱含「預購」** 的列（蝦皮與官網同一規則，不過濾商城）。"
+        "再依活動 **SKU** 對 All Orders **庫存SKU**（空白才改用商品SKU）。"
+        "`已取消` 不算進已接單與三欄；件數用 **商品數量**。"
         " Paid＝已付款；貨到付款 Unpaid＝未付款且付款方式含 Cash on Delivery／貨到付款／取貨付款；其餘未付款進銀行 Unpaid。"
         " 本機上傳只預覽，不會把 Orders 寫進 Drive。"
     )
@@ -123,20 +124,26 @@ def _render_preorder_orders_board(campaign_df):
     )
     orders_df = loaded_orders.get("orders")
     order_n = 0 if orders_df is None else len(orders_df)
+    preorder_n = 0
+    if orders_df is not None and len(orders_df) and "是預購" in orders_df.columns:
+        preorder_n = int(orders_df["是預購"].sum())
     st.caption(
         f"看板來源：{source_label} `{loaded_orders.get('name')}`　"
         f"最後修改：`{modified_label}`　"
-        f"列數：`{order_n}`"
+        f"列數：`{order_n}`　預購列數：`{preorder_n}`"
     )
 
     preview_df = preorder_line_view(orders_df)
-    with st.expander(f"來源內容（{order_n} 列）", expanded=True):
+    with st.expander(f"來源內容（{order_n} 列，其中預購 {preorder_n} 列）", expanded=True):
         st.dataframe(preview_df, use_container_width=True, hide_index=True)
-        if orders_df is not None and len(orders_df) and "對帳SKU" in orders_df.columns:
-            sku_vc = orders_df["對帳SKU"].map(_preorder_text)
+        pre_df = orders_df
+        if orders_df is not None and len(orders_df) and "是預購" in orders_df.columns:
+            pre_df = orders_df.loc[orders_df["是預購"]]
+        if pre_df is not None and len(pre_df) and "對帳SKU" in pre_df.columns:
+            sku_vc = pre_df["對帳SKU"].map(_preorder_text)
             sku_vc = sku_vc[sku_vc != ""].value_counts().head(20)
             if len(sku_vc):
-                st.caption("本檔出現的對帳 SKU（最多 20，填到上方活動表才能進三欄）")
+                st.caption("預購列的對帳 SKU（最多 20，填到上方活動表才能進三欄）")
                 st.dataframe(
                     pd.DataFrame({"SKU": list(sku_vc.index), "列數": [int(v) for v in sku_vc.values]}),
                     hide_index=True,
@@ -146,11 +153,13 @@ def _render_preorder_orders_board(campaign_df):
     board = build_preorder_board(campaign_df, orders_df)
     filled_skus = board.get("campaign_skus") or []
     matched = int(board.get("matched_order_rows") or 0)
-    if order_n and not filled_skus:
-        st.warning("活動表沒有填 SKU，三欄對不到本檔訂單。請把上方 SKU 填成 All Orders 的庫存SKU（本檔對帳 SKU 見來源內容）。")
-    elif order_n and filled_skus and matched == 0:
+    if order_n and preorder_n == 0:
+        st.info("本檔沒有商品名稱含「預購」的列，已接單與三欄為 0。")
+    elif preorder_n and not filled_skus:
+        st.warning("活動表沒有填 SKU，三欄對不到預購列。請把上方 SKU 填成預購列的庫存SKU（見來源內容）。")
+    elif preorder_n and filled_skus and matched == 0:
         shown = "、".join(f"`{s}`" for s in filled_skus[:8])
-        st.warning(f"活動 SKU（{shown}）對不到本檔任何列，所以三欄件數是 0。")
+        st.warning(f"活動 SKU（{shown}）對不到本檔任何預購列，所以三欄件數是 0。")
 
     if board["summary"].empty:
         st.info("活動表沒有列，看板為空。請先在上方新增活動 SKU。")
