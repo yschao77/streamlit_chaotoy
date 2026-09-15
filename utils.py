@@ -7,6 +7,8 @@ import io
 import os
 import re
 import json
+import time
+import urllib.request
 import zipfile
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -87,7 +89,7 @@ ID_SHOPEE_UNPUBLISHED_FOLDER = "1pVqpUUHl9RlKL-1wlje4VMP2DkEUStXk"
 ID_DOWNLOAD_ROOT = "1U0tRNz1j62ouKwtT9s-OlrtmBQGlQ5bU"
 ID_PRICE_SUMMARY_FALLBACK = "1d2a6D6-9LV6oBhlwXjb_9xm5TYN80sPd"
 ID_HISTORY_INWARD_INDEX = "12YbAlXcOdM3lFYFkh7a82yZZe7KotRNe"
-ID_PREORDER_ORDERS_FOLDER = "1EcYJDunuZ4owMds_3O7ryeVlOfM9s3x8"
+ID_PREORDER_ORDERS_FOLDER = "16XCGBr9sE5EOTqNIgZffnARDNCG0fV_m"
 ID_PREORDER_TRACKER = "1aqfHIPvavWZhtLZMdFCOnyHtllHLrca-"
 ID_SG_RESTOCK_TEMPLATE = "1QZ-_PI3T2BtHjTwmrIAEG_RZKDlxhpqt"  # SiteGiant 採購單空殼；後台 Import Restock；禁止 update
 UPC_FILLED_FILENAME = "batch_edit_upc_added_only.xlsx"
@@ -510,6 +512,48 @@ def get_drive_service():
         return init_drive_service()
     return _build_drive_service()
 
+
+def _agent_debug_log(hypothesis_id, location, message, data):
+    # #region agent log
+    try:
+        payload = {
+            "sessionId": "9f3f34",
+            "runId": "post-fix",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        line = json.dumps(payload, ensure_ascii=False) + "\n"
+        for path in (
+            r"E:\Project\shopee_product_assistant\debug-9f3f34.log",
+            os.path.join(os.path.dirname(__file__), "debug-9f3f34.log"),
+        ):
+            try:
+                with open(path, "a", encoding="utf-8") as fh:
+                    fh.write(line)
+                break
+            except Exception:
+                continue
+        try:
+            req = urllib.request.Request(
+                "http://127.0.0.1:7278/ingest/b3655cc6-1777-475d-b7db-0bfea61f42fe",
+                data=line.encode("utf-8"),
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Debug-Session-Id": "9f3f34",
+                },
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=1).read()
+        except Exception:
+            pass
+    except Exception:
+        pass
+    # #endregion
+
+
 # =========================================================================
 # 🔍 2. 雲端核心實戰工具與搜尋常式
 # =========================================================================
@@ -523,7 +567,7 @@ def _list_gdrive_files_raw(folder_id, name_contains=None, include_zip=False):
     while True:
         results = get_drive_service().files().list(
             q=query,
-            fields="nextPageToken, files(id, name, modifiedTime)",
+            fields="nextPageToken, files(id, name, modifiedTime, mimeType)",
             pageSize=100,
             pageToken=page_token,
         ).execute()
@@ -549,8 +593,36 @@ def list_gdrive_files(folder_id, name_contains=None, include_zip=False):
     try:
         files = _list_gdrive_files_raw(folder_id, name_contains=name_contains, include_zip=include_zip)
         files.sort(key=lambda x: x["name"], reverse=True)
+        # #region agent log
+        _agent_debug_log(
+            "C",
+            "utils.py:list_gdrive_files",
+            "listed folder",
+            {
+                "folder_id": folder_id,
+                "name_contains": name_contains,
+                "include_zip": include_zip,
+                "count": len(files),
+                "names": [f.get("name") for f in files[:15]],
+                "mimes": [f.get("mimeType") for f in files[:15]],
+            },
+        )
+        # #endregion
         return files
     except Exception as e:
+        # #region agent log
+        _agent_debug_log(
+            "B",
+            "utils.py:list_gdrive_files",
+            "list failed",
+            {
+                "folder_id": folder_id,
+                "name_contains": name_contains,
+                "err": type(e).__name__,
+                "msg": str(e)[:300],
+            },
+        )
+        # #endregion
         _notify_error(f"掃描雲端資料夾失敗: {str(e)}")
         return []
 
@@ -1016,13 +1088,24 @@ def _parse_named_file_date(name, kind):
 def _rank_latest_file(files, kind):
     kind = _normalize_kind(kind)
     ranked = []
+    skipped = []
     for f in files:
         file_date = _parse_named_file_date(f.get("name"), kind)
         if file_date:
             ranked.append((file_date, f.get("modifiedTime") or "", f))
         elif kind == "keyword":
             ranked.append((datetime.datetime.min, f.get("modifiedTime") or "", f))
+        else:
+            skipped.append(f.get("name"))
     if not ranked:
+        # #region agent log
+        _agent_debug_log(
+            "D",
+            "utils.py:_rank_latest_file",
+            "no dated files",
+            {"kind": kind, "listed": len(files or []), "skipped": skipped[:15]},
+        )
+        # #endregion
         if kind == "keyword" and files:
             files = sorted(files, key=lambda x: x.get("modifiedTime") or "", reverse=True)
             return files[0]
@@ -1941,6 +2024,36 @@ def read_preorder_orders_table(file_bytes, filename="orders.xlsx"):
 def _preorder_orders_drive_meta():
     drive = {"ok": False, "name": None, "modified": None, "id": None, "reason": None}
     try:
+        # #region agent log
+        user_folder = "16XCGBr9sE5EOTqNIgZffnARDNCG0fV_m"
+        cfg_folder = ID_PREORDER_ORDERS_FOLDER
+        for fid, label in ((cfg_folder, "configured"), (user_folder, "user_reported")):
+            try:
+                raw = get_drive_service().files().list(
+                    q=f"'{fid}' in parents and trashed = false",
+                    fields="files(id, name, mimeType)",
+                    pageSize=20,
+                ).execute().get("files", [])
+                _agent_debug_log(
+                    "A",
+                    "utils.py:_preorder_orders_drive_meta",
+                    "folder unfiltered list",
+                    {
+                        "label": label,
+                        "folder_id": fid,
+                        "count": len(raw),
+                        "names": [f.get("name") for f in raw],
+                        "mimes": [f.get("mimeType") for f in raw],
+                    },
+                )
+            except Exception as e:
+                _agent_debug_log(
+                    "B",
+                    "utils.py:_preorder_orders_drive_meta",
+                    "folder unfiltered failed",
+                    {"label": label, "folder_id": fid, "err": type(e).__name__, "msg": str(e)[:300]},
+                )
+        # #endregion
         _, latest = pick_latest_source("preorder_orders")
         if latest:
             return {
@@ -1951,8 +2064,24 @@ def _preorder_orders_drive_meta():
                 "reason": None,
             }
         drive["reason"] = "找不到 Orders_DD-MM-YYYY-*.xlsx"
+        # #region agent log
+        _agent_debug_log(
+            "A",
+            "utils.py:_preorder_orders_drive_meta",
+            "latest missing",
+            {"configured_folder": cfg_folder, "latest": None},
+        )
+        # #endregion
     except Exception as e:
         drive["reason"] = _status_error_text(e)
+        # #region agent log
+        _agent_debug_log(
+            "B",
+            "utils.py:_preorder_orders_drive_meta",
+            "meta exception",
+            {"err": type(e).__name__, "msg": str(e)[:300]},
+        )
+        # #endregion
     return drive
 
 
