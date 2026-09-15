@@ -42,6 +42,7 @@ from utils import (
     PREORDER_TRACKER_NAME,
     load_preorder_orders,
     build_preorder_board,
+    build_preorder_arrival_copy,
     preorder_line_view,
     _preorder_text,
     parse_vendor_po_bytes,
@@ -174,6 +175,7 @@ def _render_preorder_orders_board(campaign_df):
 
     if board["summary"].empty:
         st.info("活動表沒有列，看板為空。請先在上方新增活動 SKU。")
+        _render_preorder_arrival_copy(board)
         return orders_df
 
     over = board.get("over_limit_skus") or []
@@ -181,7 +183,7 @@ def _render_preorder_orders_board(campaign_df):
         st.warning("⚠️ 已接單已達或超過上限：" + "、".join(f"`{sku}`" for sku in over))
 
     st.dataframe(board["summary"], use_container_width=True, hide_index=True)
-    st.caption("Paid＝可打單；貨到付款 Unpaid＝可打單、不催款；銀行 Unpaid＝催款後才打單。結單鎖定與兩檔下載在看板下方。")
+    st.caption("Paid＝可打單；貨到付款 Unpaid＝可打單、不催款；銀行 Unpaid＝催款後才打單。催款文在看板下方；結單兩檔再下面。")
 
     for item in board["campaigns"]:
         sku = item["sku"] or "（未填 SKU）"
@@ -210,7 +212,38 @@ def _render_preorder_orders_board(campaign_df):
                 st.caption("其餘未付款；催款後才打單")
                 st.metric("銀行 Unpaid 件數", item["bank_unpaid_qty"])
                 st.dataframe(item["bank_unpaid_lines"], use_container_width=True, hide_index=True)
+    _render_preorder_arrival_copy(board)
     return orders_df
+
+
+def _render_preorder_arrival_copy(board):
+    st.subheader("📬 到貨催款與可打單（第4階）")
+    st.info(
+        "銀行 Unpaid 才進催款文（可貼社群）。貨到付款 Unpaid 只在可打單名單、**不催款**。"
+        " Paid 另列可打單。打單仍在 SiteGiant；本頁不產生綠界物流單。"
+    )
+    copies = build_preorder_arrival_copy(board)
+    bank_text = copies.get("bank_reminder") or ""
+    cod_text = copies.get("cod_pick") or ""
+    paid_text = copies.get("paid_pick") or ""
+    st.text_area(
+        f"銀行催款可複貼文（{copies.get('bank_n', 0)} 列）",
+        value=bank_text,
+        height=220,
+        key=f"preorder_copy_bank_{hash(bank_text)}",
+    )
+    st.text_area(
+        f"貨到付款可打單名單（不催款，{copies.get('cod_n', 0)} 列）",
+        value=cod_text,
+        height=160,
+        key=f"preorder_copy_cod_{hash(cod_text)}",
+    )
+    st.text_area(
+        f"Paid 可打單名單（{copies.get('paid_n', 0)} 列）",
+        value=paid_text,
+        height=160,
+        key=f"preorder_copy_paid_{hash(paid_text)}",
+    )
 
 
 def _render_preorder_vendor_import(campaign_df):
@@ -287,7 +320,7 @@ def _render_preorder_close(campaign_df, orders_df):
     st.subheader("🔒 結單鎖定與兩檔下載（第3階）")
     st.info(
         "鎖定數量 = 自購 + min(客戶量, 上限)。上限空＝不封頂；自購空＝0。"
-        " 未填 SKU 的列不算客戶量、不鎖定。Restock 只給本機下載，不會覆寫雲端空殼。"
+        " 未填 SKU 的列不算客戶量、不鎖定。SiteGiant 採購單只給本機下載，不會覆寫雲端空殼。"
     )
     dups = duplicate_preorder_skus(campaign_df)
     if dups:
@@ -377,7 +410,7 @@ def _render_preorder_close(campaign_df, orders_df):
     with restock_col:
         restock = probe_sg_restock_template()
         if not restock.get("ok"):
-            st.error(f"❌ 無法讀取 Restock 空殼：{restock.get('reason')}")
+            st.error(f"❌ 無法讀取 SiteGiant 採購單空殼：{restock.get('reason')}")
         elif locked_rows:
             filled_r = st.session_state.get("preorder_restock_fill")
             if filled_r is None:
@@ -389,15 +422,15 @@ def _render_preorder_close(campaign_df, orders_df):
                 st.session_state["preorder_restock_fill"] = filled_r
             if filled_r.get("ok"):
                 st.download_button(
-                    label=f"📥 下載 Restock 匯入檔（{filled_r.get('rows', 0)} 列，未寫回雲端空殼）",
+                    label=f"📥 下載 SiteGiant 採購單（{filled_r.get('rows', 0)} 列，未寫回雲端空殼）",
                     data=filled_r.get("bytes") or b"",
-                    file_name=filled_r.get("filename") or "restock.xlsx",
+                    file_name=filled_r.get("filename") or "sitegiant採購單.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True,
                     key="preorder_restock_filled_dl",
                 )
             else:
-                st.error(f"❌ 填 Restock 失敗：{filled_r.get('reason')}")
+                st.error(f"❌ 填 SiteGiant 採購單失敗：{filled_r.get('reason')}")
 
     hist = st.session_state.get("preorder_vendor_history_df")
     if hist is not None and len(hist):
@@ -1254,18 +1287,19 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
         st.subheader("🗓️ 預購活動表（第1階）")
         st.info(
             "活動表讀寫雲端 `預購追蹤.xlsx`。可從廠商訂購單勾選匯入貨號／品名／條碼（沒條碼也可）。"
-            " 第2階用最新 All Orders 拆三欄；第3階結單鎖定後下載廠商訂量檔與 Restock（空殼只讀、不會被蓋掉）。"
+            " 第2階用最新 All Orders 拆三欄；第3階結單鎖定後下載廠商訂量檔與 SiteGiant 採購單（空殼只讀、不會被蓋掉）。"
+            " 第4階在看板下方產出銀行催款文與可打單名單。"
             " 寫回只覆寫既有檔，不會新建。本機上傳的 Orders 只預覽，不會上傳到 Drive。"
         )
 
         restock = probe_sg_restock_template()
         if restock.get("ok"):
             st.success(
-                f"Import Restock 空殼可下載：`{restock.get('name')}`"
+                f"SiteGiant 採購單空殼可下載：`{restock.get('name')}`"
                 f"（{restock.get('nbytes', 0)} bytes，未寫回此檔）"
             )
             st.download_button(
-                label="📥 本機下載官方 Restock 空殼（不會改雲端）",
+                label="📥 本機下載官方 SiteGiant 採購單空殼（不會改雲端）",
                 data=restock.get("bytes") or b"",
                 file_name=restock.get("name") or "import_restock.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1273,7 +1307,7 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
                 key="preorder_restock_shell_dl",
             )
         else:
-            st.error(f"❌ 無法讀取 Import Restock 空殼：{restock.get('reason') or '未知錯誤'}")
+            st.error(f"❌ 無法讀取 SiteGiant 採購單空殼：{restock.get('reason') or '未知錯誤'}")
 
         st.write("---")
         reload = st.button("🔄 重新載入預購追蹤", use_container_width=True, key="preorder_reload")
@@ -1301,7 +1335,7 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
             return
 
         if st.session_state.pop("preorder_save_ok", False):
-            st.success("✅ 已覆寫雲端預購追蹤.xlsx（未新建檔、未改 Restock 空殼）。")
+            st.success("✅ 已覆寫雲端預購追蹤.xlsx（未新建檔、未改 SiteGiant 採購單空殼）。")
         import_msg = st.session_state.pop("preorder_vendor_import_msg", None)
         if import_msg:
             st.success(import_msg)

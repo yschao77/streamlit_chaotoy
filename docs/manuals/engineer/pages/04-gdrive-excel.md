@@ -30,7 +30,7 @@
 | shopee_unpublished | 蝦皮_未上架 | `mass_republish_items_3062950_*.xlsx` | 否 |
 | preorder_orders | Sitegiant_Preorder_Orders | `Orders_DD-MM-YYYY-*.xlsx` | 是 |
 | preorder_tracker | 預購追蹤.xlsx（file id） | `預購追蹤.xlsx` | 是 |
-| sg_restock_template | Import Restock 官方殼（file id，只讀） | 後台下載的空殼 | 否 |
+| sg_restock_template | SiteGiant 採購單空殼（file id，只讀） | 後台 Import Restock 下載的空殼 | 否 |
 
 `consumed=False` 只出現在狀態頁，不寫入主表。`preorder_orders` 已改為 consumed：預購追蹤第2階看板會讀最新 `Orders_DD-MM-YYYY-*.xlsx`。本機上傳只預覽，禁止把 All Orders `files.create` 到 Drive。
 

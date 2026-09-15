@@ -21,4 +21,4 @@
 - Sitegiant_Preorder_Orders: 1EcYJDunuZ4owMds_3O7ryeVlOfM9s3x8
   - file format: Orders_DD-MM-YYYY-*.xlsx
 - 預購追蹤.xlsx: 1aqfHIPvavWZhtLZMdFCOnyHtllHLrca-
-- SiteGiant Import Restock 官方殼（只讀，勿覆寫）: 1QZ-_PI3T2BtHjTwmrIAEG_RZKDlxhpqt
+- SiteGiant 採購單空殼（只讀，勿覆寫；後台 Import Restock）: 1QZ-_PI3T2BtHjTwmrIAEG_RZKDlxhpqt

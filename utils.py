@@ -89,7 +89,7 @@ ID_PRICE_SUMMARY_FALLBACK = "1d2a6D6-9LV6oBhlwXjb_9xm5TYN80sPd"
 ID_HISTORY_INWARD_INDEX = "12YbAlXcOdM3lFYFkh7a82yZZe7KotRNe"
 ID_PREORDER_ORDERS_FOLDER = "1EcYJDunuZ4owMds_3O7ryeVlOfM9s3x8"
 ID_PREORDER_TRACKER = "1aqfHIPvavWZhtLZMdFCOnyHtllHLrca-"
-ID_SG_RESTOCK_TEMPLATE = "1QZ-_PI3T2BtHjTwmrIAEG_RZKDlxhpqt"
+ID_SG_RESTOCK_TEMPLATE = "1QZ-_PI3T2BtHjTwmrIAEG_RZKDlxhpqt"  # SiteGiant 採購單空殼；後台 Import Restock；禁止 update
 UPC_FILLED_FILENAME = "batch_edit_upc_added_only.xlsx"
 HISTORY_INWARD_INDEX_NAME = "入庫明細索引.xlsx"
 PREORDER_TRACKER_NAME = "預購追蹤.xlsx"
@@ -196,6 +196,22 @@ PREORDER_ORDERS_LINE_COLUMNS = (
     "付款狀態",
     "訂單狀態",
     "是預購",
+)
+PREORDER_LINE_CUSTOMER_HEADERS = (
+    "顧客名稱",
+    "客戶名稱",
+    "買家名稱",
+    "顧客",
+    "收件人名稱",
+    "收件人",
+    "customer name",
+)
+PREORDER_LINE_AMOUNT_HEADERS = (
+    "訂單金額",
+    "總金額",
+    "應付金額",
+    "金額",
+    "訂單總額",
 )
 PREORDER_BOARD_COLUMNS = (
     "月份",
@@ -369,12 +385,12 @@ TRACKED_SOURCES = (
     },
     {
         "key": "sg_restock_template",
-        "folder": "SiteGiant Import Restock 殼",
+        "folder": "SiteGiant 採購單空殼",
         "folder_id": ID_PREORDER_ORDERS_FOLDER,
         "file_id": ID_SG_RESTOCK_TEMPLATE,
         "name_contains": "",
         "kind": "file_id",
-        "pattern": "Import Restock 官方空殼（只讀）",
+        "pattern": "SiteGiant 採購單空殼（只讀）",
         "include_zip": False,
         "consumed": False,
     },
@@ -1668,11 +1684,11 @@ def _preorder_tracker_not_xlsx_reason(mime, name):
 
 
 def probe_sg_restock_template():
-    """只讀官方 Import Restock 空殼；禁止寫回此 file id。"""
+    """只讀 SiteGiant 採購單空殼（後台 Import Restock）；禁止寫回此 file id。"""
     try:
         meta = get_gdrive_file_meta(ID_SG_RESTOCK_TEMPLATE)
         if meta.get("trashed"):
-            return {"ok": False, "reason": "Import Restock 空殼在垃圾桶。"}
+            return {"ok": False, "reason": "SiteGiant 採購單空殼在垃圾桶。"}
         payload = get_cached_gdrive_file_bytes(ID_SG_RESTOCK_TEMPLATE)
         return {
             "ok": True,
@@ -1794,6 +1810,17 @@ def _preorder_text(val):
     return s
 
 
+def _first_matching_column(df, names):
+    if df is None:
+        return None
+    lookup = {str(c).strip().lower(): c for c in df.columns}
+    for name in names:
+        key = str(name).strip().lower()
+        if key in lookup:
+            return lookup[key]
+    return None
+
+
 def _preorder_qty_sum(series):
     if series is None or len(series) == 0:
         return 0
@@ -1863,7 +1890,18 @@ def preorder_line_view(df):
         "訂單狀態": df["訂單狀態"].map(_preorder_text) if "訂單狀態" in df.columns else "",
         "是預購": flag,
     })
-    return out[list(PREORDER_ORDERS_LINE_COLUMNS)].reset_index(drop=True)
+    cust_col = _first_matching_column(df, PREORDER_LINE_CUSTOMER_HEADERS)
+    if cust_col:
+        out["顧客"] = df[cust_col].map(_preorder_text).to_numpy()
+    amt_col = _first_matching_column(df, PREORDER_LINE_AMOUNT_HEADERS)
+    if amt_col:
+        out["金額"] = df[amt_col].map(_preorder_text).to_numpy()
+    cols = list(PREORDER_ORDERS_LINE_COLUMNS)
+    if "顧客" in out.columns:
+        cols.append("顧客")
+    if "金額" in out.columns:
+        cols.append("金額")
+    return out[cols].reset_index(drop=True)
 
 
 def prepare_preorder_orders_df(df):
@@ -2064,6 +2102,114 @@ def build_preorder_board(campaign_df, orders_df):
         "order_rows": int(len(orders)),
         "preorder_rows": int(len(board_orders)),
         "campaign_skus": [s for s in camp_skus if s],
+    }
+
+
+def _concat_preorder_bucket_lines(board, key):
+    frames = []
+    for item in board.get("campaigns") or []:
+        df = item.get(key)
+        if df is not None and len(df):
+            frames.append(df)
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
+
+
+def _preorder_qty_label(val):
+    n = pd.to_numeric(val, errors="coerce")
+    if pd.isna(n):
+        return "x0"
+    n = float(n)
+    if n.is_integer():
+        return f"x{int(n)}"
+    return f"x{n}"
+
+
+def _preorder_copy_bits(row, extra=True):
+    bits = [
+        _preorder_text(row.get("訂單編號")),
+        _preorder_text(row.get("SKU")),
+        _preorder_text(row.get("商品名稱")),
+        _preorder_qty_label(row.get("商品數量")),
+        _preorder_text(row.get("付款方式")),
+    ]
+    if extra:
+        customer = _preorder_text(row.get("顧客"))
+        amount = _preorder_text(row.get("金額"))
+        if customer:
+            bits.append(customer)
+        if amount:
+            bits.append(amount)
+    return [b for b in bits if b]
+
+
+def _format_preorder_pick_lines(df):
+    if df is None or df.empty:
+        return []
+    lines = []
+    for _, row in df.iterrows():
+        bits = _preorder_copy_bits(row, extra=True)
+        if bits:
+            lines.append("｜".join(bits))
+    return lines
+
+
+def _format_preorder_bank_lines(df):
+    if df is None or df.empty:
+        return []
+    lines = []
+    for _, row in df.iterrows():
+        order_no = _preorder_text(row.get("訂單編號"))
+        name = _preorder_text(row.get("商品名稱"))
+        qty = _preorder_qty_label(row.get("商品數量"))
+        extra = []
+        customer = _preorder_text(row.get("顧客"))
+        amount = _preorder_text(row.get("金額"))
+        if customer:
+            extra.append(customer)
+        if amount:
+            extra.append(amount)
+        core = "｜".join([p for p in (f"訂單 {order_no}" if order_no else "", name, qty) if p])
+        if extra:
+            core = core + "｜" + "｜".join(extra)
+        if core:
+            lines.append(core)
+    return lines
+
+
+def build_preorder_arrival_copy(board):
+    """第4階：銀行催款可複貼文、貨到付款可打單、Paid 可打單。COD 不進催款文。"""
+    board = board or {}
+    bank_df = _concat_preorder_bucket_lines(board, "bank_unpaid_lines")
+    cod_df = _concat_preorder_bucket_lines(board, "cod_unpaid_lines")
+    paid_df = _concat_preorder_bucket_lines(board, "paid_lines")
+    bank_lines = _format_preorder_bank_lines(bank_df)
+    if bank_lines:
+        bank_text = (
+            "【預購到貨・請完成匯款】\n"
+            + "\n".join(bank_lines)
+            + "\n\n付完請回覆，對帳後才打單。貨到付款訂單不必匯款。"
+        )
+    else:
+        bank_text = "目前沒有銀行 Unpaid 預購單，不必催款。"
+    cod_lines = _format_preorder_pick_lines(cod_df)
+    if cod_lines:
+        cod_text = "【貨到付款可打單・不催款】\n" + "\n".join(cod_lines)
+    else:
+        cod_text = "目前沒有貨到付款可打單預購單。"
+    paid_lines = _format_preorder_pick_lines(paid_df)
+    if paid_lines:
+        paid_text = "【Paid 可打單】\n" + "\n".join(paid_lines)
+    else:
+        paid_text = "目前沒有 Paid 可打單預購單。"
+    return {
+        "bank_reminder": bank_text,
+        "cod_pick": cod_text,
+        "paid_pick": paid_text,
+        "bank_n": len(bank_lines),
+        "cod_n": len(cod_lines),
+        "paid_n": len(paid_lines),
     }
 
 
@@ -2449,12 +2595,12 @@ def _find_restock_header_map(values):
 
 
 def fill_sg_restock_bytes(template_bytes, locked_rows, filename="import_restock.xlsx"):
-    """複製官方空殼填 iSKU + 鎖定數量。呼叫端禁止 update Drive 空殼 file id。"""
+    """複製 SiteGiant 採購單空殼填 iSKU + 鎖定數量。呼叫端禁止 update Drive 空殼 file id。"""
     payload = template_bytes if isinstance(template_bytes, (bytes, bytearray)) else bytes(template_bytes or b"")
     try:
         wb = openpyxl.load_workbook(io.BytesIO(payload))
     except Exception as e:
-        return {"ok": False, "reason": f"無法開啟 Restock 空殼。{e}"}
+        return {"ok": False, "reason": f"無法開啟 SiteGiant 採購單空殼。{e}"}
 
     target = None
     for ws in wb.worksheets:
@@ -2468,7 +2614,7 @@ def fill_sg_restock_bytes(template_bytes, locked_rows, filename="import_restock.
         if target:
             break
     if not target:
-        return {"ok": False, "reason": "Restock 空殼找不到 iSKU／數量表頭。"}
+        return {"ok": False, "reason": "SiteGiant 採購單空殼找不到 iSKU／數量表頭。"}
 
     ws, header_row, header_map = target
     sku_col = header_map["sku"] + 1
@@ -2485,7 +2631,7 @@ def fill_sg_restock_bytes(template_bytes, locked_rows, filename="import_restock.
     out = io.BytesIO()
     wb.save(out)
     stamp = taipei_now().strftime("%Y%m%d")
-    out_name = f"sitegiant_restock_preorder_{stamp}.xlsx"
+    out_name = f"sitegiant採購單_預購_{stamp}.xlsx"
     return {
         "ok": True,
         "bytes": out.getvalue(),

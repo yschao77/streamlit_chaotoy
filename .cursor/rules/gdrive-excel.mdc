@@ -20,7 +20,7 @@ alwaysApply: false
 | `ID_SHOPEE_MASS_UPDATE_FOLDER` | `mass_update_sales_info_3062950_YYYYMMDD*.xlsx` |
 | `ID_PREORDER_ORDERS_FOLDER` | `Orders_DD-MM-YYYY-*.xlsx` |
 | `ID_PREORDER_TRACKER` | `預購追蹤.xlsx`（只覆寫此 file id） |
-| `ID_SG_RESTOCK_TEMPLATE` | Import Restock 官方空殼（只讀，禁止 update） |
+| `ID_SG_RESTOCK_TEMPLATE` | SiteGiant 採購單空殼（後台 Import Restock；只讀，禁止 update） |
 
 ## 讀寫引擎
 

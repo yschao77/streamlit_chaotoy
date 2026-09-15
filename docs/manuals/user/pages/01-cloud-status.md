@@ -27,7 +27,7 @@
 
 已接入的來源包括：麗嬰總表、商品列表、蝦皮賣場列表、價格統整表、Sitegiant UPC、Sitegiant BasicInfo、蝦皮價格及庫存（mass_update）、預購追蹤.xlsx、Sitegiant_Preorder_Orders（All Orders）。
 
-「僅監看」另含蝦皮媒體／標題描述／配送／未上架，以及 Import Restock 官方殼。
+「僅監看」另含蝦皮媒體／標題描述／配送／未上架，以及 SiteGiant 採購單空殼。
 
 頁面下方會顯示「已接入 N 個來源，僅監看 M 個」。
 
