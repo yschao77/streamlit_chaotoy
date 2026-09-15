@@ -1,5 +1,5 @@
 ---
-description: 預購追蹤、結單、到貨催款、現貨上架、廠商預購單、綠界貨到付款
+description: 預購追蹤、結單、到貨催款、現貨上架、廠商預購單
 alwaysApply: false
 ---
 
@@ -7,10 +7,12 @@ alwaysApply: false
 
 - 不接 SiteGiant Open API、不接綠界 API。Excel／Drive 進出；綠界金流／物流只在 SiteGiant 後台開。
 - 新子頁掛 Sitegiant 模組；邏輯放 `utils.py`，畫面放 `views/`。`預購追蹤.xlsx` 須先手動建檔再覆寫（禁止 API 新建）。
-- 看板三欄：Paid 可打單；貨到付款 Unpaid 可打單、不催款；銀行 Unpaid 催款後才打單。
+- 訂單／付款狀態對齊官方說明：https://support.sitegiant.com/zh/knowledge-base/how-the-order-payment-and-fulfillment-status-works-zh/
+- 看板兩欄：已付款／未付款。不看付款方式、不拆貨到付款。
 - All Orders 預購列：商品名稱含「預購」（蝦皮與官網同一規則，不過濾商城）。再依庫存SKU（空白才商品SKU）對活動表 SKU。
+- 工作表 `預購訂單` 是 All Orders 快照（每次整表覆寫），不是官方訂單狀態「待處理」。`SKU狀態` 預設預購，標到貨才催款。`通知紀錄` 以訂單編號+SKU 存首次通知日。
+- 催款：到貨 SKU × 未付款 × 非已取消 × 非已退款。可打單：到貨 SKU × 已付款 × 訂單狀態＝待處理。
 - 廠商訂購單可勾選匯入活動表（沒條碼也可）。upsert：條碼 → 廠商檔名+貨號 → 檔名+品名。不覆蓋 SKU／自購／上限。
 - 結單後才鎖定 `自購 + min(客戶量, 上限)`。回填原檔只改訂量（先條碼、再貨號）。SiteGiant 採購單（後台 Import Restock）填空殼後只本機下載，禁止覆寫 `ID_SG_RESTOCK_TEMPLATE`。
-- 第4階：銀行催款可複貼文、貨到付款可打單名單、Paid 可打單名單。打單仍在 SiteGiant。
 - 入庫分配第一版在 SiteGiant 人工做。商品清單加廠商貨號是未來待做。
 - 每天看狀態用 Drive 表；操作用 Streamlit Cloud＋既有 Actions 喚醒。不要為看板去租主機。

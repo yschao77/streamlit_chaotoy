@@ -7,8 +7,6 @@ import io
 import os
 import re
 import json
-import time
-import urllib.request
 import zipfile
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -97,6 +95,10 @@ HISTORY_INWARD_INDEX_NAME = "入庫明細索引.xlsx"
 PREORDER_TRACKER_NAME = "預購追蹤.xlsx"
 PREORDER_CAMPAIGN_SHEET = "活動"
 PREORDER_VENDOR_HISTORY_SHEET = "廠商單歷史"
+PREORDER_ORDERS_SHEET = "預購訂單"
+PREORDER_SKU_STATUS_SHEET = "SKU狀態"
+PREORDER_NOTIFY_SHEET = "通知紀錄"
+PREORDER_LEGACY_PENDING_SHEET = "待處理"
 PREORDER_CAMPAIGN_COLUMNS = (
     "月份",
     "結單日",
@@ -221,19 +223,39 @@ PREORDER_BOARD_COLUMNS = (
     "品名",
     "已接單",
     "上限",
-    "Paid 件數",
-    "貨到付款 Unpaid 件數",
-    "銀行 Unpaid 件數",
+    "已付款件數",
+    "未付款件數",
     "達上限",
 )
+PREORDER_SKU_STATUS_COLUMNS = (
+    "SKU",
+    "品名",
+    "件數",
+    "狀態",
+    "來源檔",
+)
+PREORDER_NOTIFY_COLUMNS = (
+    "訂單編號",
+    "SKU",
+    "首次通知日",
+)
 PREORDER_CANCELLED_STATUS = "已取消"
+PREORDER_PENDING_PROCESS_STATUS = "待處理"
 PREORDER_NAME_MARKER = "預購"
 PREORDER_PAID_STATUS = "已付款"
 PREORDER_UNPAID_STATUS = "未付款"
-PREORDER_COD_PAY_MARKERS = ("cash on delivery", "貨到付款", "取貨付款")
+PREORDER_REFUNDED_STATUS = "已退款"
+PREORDER_STATUS_PREORDER = "預購"
+PREORDER_STATUS_ARRIVED = "到貨"
 PREORDER_BUCKET_PAID = "paid"
-PREORDER_BUCKET_COD_UNPAID = "cod_unpaid"
-PREORDER_BUCKET_BANK_UNPAID = "bank_unpaid"
+PREORDER_BUCKET_UNPAID = "unpaid"
+PREORDER_TRACKER_RESERVED_SHEETS = (
+    PREORDER_CAMPAIGN_SHEET,
+    PREORDER_VENDOR_HISTORY_SHEET,
+    PREORDER_ORDERS_SHEET,
+    PREORDER_SKU_STATUS_SHEET,
+    PREORDER_NOTIFY_SHEET,
+)
 XLSX_OOXML_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 GOOGLE_SHEETS_MIME = "application/vnd.google-apps.spreadsheet"
 FOLDER_MIME_QUERY = "mimeType = 'application/vnd.google-apps.folder'"
@@ -512,48 +534,6 @@ def get_drive_service():
         return init_drive_service()
     return _build_drive_service()
 
-
-def _agent_debug_log(hypothesis_id, location, message, data):
-    # #region agent log
-    try:
-        payload = {
-            "sessionId": "9f3f34",
-            "runId": "post-fix",
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": int(time.time() * 1000),
-        }
-        line = json.dumps(payload, ensure_ascii=False) + "\n"
-        for path in (
-            r"E:\Project\shopee_product_assistant\debug-9f3f34.log",
-            os.path.join(os.path.dirname(__file__), "debug-9f3f34.log"),
-        ):
-            try:
-                with open(path, "a", encoding="utf-8") as fh:
-                    fh.write(line)
-                break
-            except Exception:
-                continue
-        try:
-            req = urllib.request.Request(
-                "http://127.0.0.1:7278/ingest/b3655cc6-1777-475d-b7db-0bfea61f42fe",
-                data=line.encode("utf-8"),
-                headers={
-                    "Content-Type": "application/json",
-                    "X-Debug-Session-Id": "9f3f34",
-                },
-                method="POST",
-            )
-            urllib.request.urlopen(req, timeout=1).read()
-        except Exception:
-            pass
-    except Exception:
-        pass
-    # #endregion
-
-
 # =========================================================================
 # 🔍 2. 雲端核心實戰工具與搜尋常式
 # =========================================================================
@@ -567,7 +547,7 @@ def _list_gdrive_files_raw(folder_id, name_contains=None, include_zip=False):
     while True:
         results = get_drive_service().files().list(
             q=query,
-            fields="nextPageToken, files(id, name, modifiedTime, mimeType)",
+            fields="nextPageToken, files(id, name, modifiedTime)",
             pageSize=100,
             pageToken=page_token,
         ).execute()
@@ -593,36 +573,8 @@ def list_gdrive_files(folder_id, name_contains=None, include_zip=False):
     try:
         files = _list_gdrive_files_raw(folder_id, name_contains=name_contains, include_zip=include_zip)
         files.sort(key=lambda x: x["name"], reverse=True)
-        # #region agent log
-        _agent_debug_log(
-            "C",
-            "utils.py:list_gdrive_files",
-            "listed folder",
-            {
-                "folder_id": folder_id,
-                "name_contains": name_contains,
-                "include_zip": include_zip,
-                "count": len(files),
-                "names": [f.get("name") for f in files[:15]],
-                "mimes": [f.get("mimeType") for f in files[:15]],
-            },
-        )
-        # #endregion
         return files
     except Exception as e:
-        # #region agent log
-        _agent_debug_log(
-            "B",
-            "utils.py:list_gdrive_files",
-            "list failed",
-            {
-                "folder_id": folder_id,
-                "name_contains": name_contains,
-                "err": type(e).__name__,
-                "msg": str(e)[:300],
-            },
-        )
-        # #endregion
         _notify_error(f"掃描雲端資料夾失敗: {str(e)}")
         return []
 
@@ -1088,24 +1040,13 @@ def _parse_named_file_date(name, kind):
 def _rank_latest_file(files, kind):
     kind = _normalize_kind(kind)
     ranked = []
-    skipped = []
     for f in files:
         file_date = _parse_named_file_date(f.get("name"), kind)
         if file_date:
             ranked.append((file_date, f.get("modifiedTime") or "", f))
         elif kind == "keyword":
             ranked.append((datetime.datetime.min, f.get("modifiedTime") or "", f))
-        else:
-            skipped.append(f.get("name"))
     if not ranked:
-        # #region agent log
-        _agent_debug_log(
-            "D",
-            "utils.py:_rank_latest_file",
-            "no dated files",
-            {"kind": kind, "listed": len(files or []), "skipped": skipped[:15]},
-        )
-        # #endregion
         if kind == "keyword" and files:
             files = sorted(files, key=lambda x: x.get("modifiedTime") or "", reverse=True)
             return files[0]
@@ -1756,6 +1697,36 @@ def ensure_preorder_vendor_history_df(df):
     return out
 
 
+def ensure_preorder_sku_status_df(df):
+    out = ensure_columns(df, PREORDER_SKU_STATUS_COLUMNS)
+    out["SKU"] = out["SKU"].map(_preorder_text)
+    out["品名"] = out["品名"].map(_preorder_text)
+    out["來源檔"] = out["來源檔"].map(_preorder_text)
+    out["件數"] = pd.to_numeric(out["件數"], errors="coerce").fillna(0)
+    status = out["狀態"].map(_preorder_text)
+    out["狀態"] = status.where(status == PREORDER_STATUS_ARRIVED, PREORDER_STATUS_PREORDER)
+    out.loc[status == "", "狀態"] = PREORDER_STATUS_PREORDER
+    return out
+
+
+def ensure_preorder_notify_df(df):
+    out = ensure_columns(df, PREORDER_NOTIFY_COLUMNS)
+    out["訂單編號"] = out["訂單編號"].map(_preorder_text)
+    out["SKU"] = out["SKU"].map(_preorder_text)
+    out["首次通知日"] = out["首次通知日"].map(_preorder_text)
+    return out
+
+
+def ensure_preorder_pending_df(df):
+    cols = list(PREORDER_ORDERS_LINE_COLUMNS) + ["首次通知日", "已過天數"]
+    out = df.copy() if df is not None else pd.DataFrame()
+    for col in cols:
+        if col not in out.columns:
+            out[col] = "" if col != "商品數量" else 0
+    extras = [c for c in out.columns if c not in cols]
+    return out[cols + extras]
+
+
 def _preorder_tracker_not_xlsx_reason(mime, name):
     mime = mime or ""
     name = (name or "").lower()
@@ -1824,6 +1795,12 @@ def load_preorder_tracker():
 
     campaign = ensure_preorder_campaign_df(campaign)
     vendor_hist = ensure_preorder_vendor_history_df(leftover.pop(PREORDER_VENDOR_HISTORY_SHEET, None))
+    pending_raw = leftover.pop(PREORDER_ORDERS_SHEET, None)
+    if pending_raw is None:
+        pending_raw = leftover.pop(PREORDER_LEGACY_PENDING_SHEET, None)
+    sku_status = ensure_preorder_sku_status_df(leftover.pop(PREORDER_SKU_STATUS_SHEET, None))
+    notify = ensure_preorder_notify_df(leftover.pop(PREORDER_NOTIFY_SHEET, None))
+    pending = ensure_preorder_pending_df(pending_raw)
     others = leftover
     return {
         "ok": True,
@@ -1831,20 +1808,54 @@ def load_preorder_tracker():
         "modified": meta.get("modifiedTime"),
         "campaign": campaign,
         "vendor_history": vendor_hist,
+        "pending": pending,
+        "sku_status": sku_status,
+        "notify": notify,
         "other_sheets": others,
     }
 
 
-def preorder_tracker_bytes(campaign_df, vendor_history_df=None, other_sheets=None):
+def _add_preorder_sku_status_validation(ws, n_rows):
+    from openpyxl.worksheet.datavalidation import DataValidation
+    from openpyxl.utils import get_column_letter
+
+    headers = [cell.value for cell in ws[1]]
+    if "狀態" not in headers:
+        return
+    col_idx = headers.index("狀態") + 1
+    letter = get_column_letter(col_idx)
+    end_row = max(int(n_rows) + 1, 2) + 50
+    dv = DataValidation(type="list", formula1='"預購,到貨"', allow_blank=True)
+    dv.error = "請選預購或到貨"
+    dv.errorTitle = "狀態"
+    dv.showErrorMessage = True
+    dv.add(f"{letter}2:{letter}{end_row}")
+    ws.add_data_validation(dv)
+
+
+def preorder_tracker_bytes(
+    campaign_df,
+    vendor_history_df=None,
+    other_sheets=None,
+    pending_df=None,
+    sku_status_df=None,
+    notify_df=None,
+):
     campaign = ensure_preorder_campaign_df(campaign_df)
     vendor_hist = ensure_preorder_vendor_history_df(vendor_history_df)
+    pending = ensure_preorder_pending_df(pending_df)
+    sku_status = ensure_preorder_sku_status_df(sku_status_df)
+    notify = ensure_preorder_notify_df(notify_df)
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         campaign.to_excel(writer, index=False, sheet_name=PREORDER_CAMPAIGN_SHEET)
         vendor_hist.to_excel(writer, index=False, sheet_name=PREORDER_VENDOR_HISTORY_SHEET)
+        pending.to_excel(writer, index=False, sheet_name=PREORDER_ORDERS_SHEET)
+        sku_status.to_excel(writer, index=False, sheet_name=PREORDER_SKU_STATUS_SHEET)
+        notify.to_excel(writer, index=False, sheet_name=PREORDER_NOTIFY_SHEET)
         for sheet_name, df in (other_sheets or {}).items():
             safe = str(sheet_name or "其他")[:31]
-            if safe in (PREORDER_CAMPAIGN_SHEET, PREORDER_VENDOR_HISTORY_SHEET):
+            if safe in PREORDER_TRACKER_RESERVED_SHEETS or safe == PREORDER_LEGACY_PENDING_SHEET:
                 continue
             (df if df is not None else pd.DataFrame()).to_excel(writer, index=False, sheet_name=safe)
         ws = writer.sheets[PREORDER_CAMPAIGN_SHEET]
@@ -1854,13 +1865,29 @@ def preorder_tracker_bytes(campaign_df, vendor_history_df=None, other_sheets=Non
             col_idx = list(campaign.columns).index(col_name) + 1
             for row_idx in range(2, len(campaign) + 2):
                 ws.cell(row=row_idx, column=col_idx).number_format = "@"
+        _add_preorder_sku_status_validation(writer.sheets[PREORDER_SKU_STATUS_SHEET], len(sku_status))
     return buf.getvalue()
 
 
-def save_preorder_tracker(campaign_df, vendor_history_df=None, other_sheets=None, file_name=None):
+def save_preorder_tracker(
+    campaign_df,
+    vendor_history_df=None,
+    other_sheets=None,
+    file_name=None,
+    pending_df=None,
+    sku_status_df=None,
+    notify_df=None,
+):
     if not ID_PREORDER_TRACKER:
         return {"ok": False, "reason": "未設定預購追蹤檔 ID。"}
-    payload = preorder_tracker_bytes(campaign_df, vendor_history_df, other_sheets)
+    payload = preorder_tracker_bytes(
+        campaign_df,
+        vendor_history_df,
+        other_sheets,
+        pending_df=pending_df,
+        sku_status_df=sku_status_df,
+        notify_df=notify_df,
+    )
     try:
         upload_or_update_gdrive_file(
             ID_PREORDER_ORDERS_FOLDER,
@@ -1936,20 +1963,13 @@ def is_preorder_product_name(name):
     return PREORDER_NAME_MARKER in _preorder_text(name)
 
 
-def is_preorder_cod_pay_method(pay_method):
-    text = _preorder_text(pay_method).lower()
-    return any(marker in text for marker in PREORDER_COD_PAY_MARKERS)
-
-
-def classify_preorder_pay_bucket(pay_status, pay_method):
-    """Paid／貨到付款 Unpaid／銀行 Unpaid；已取消列請先排除。"""
+def classify_preorder_pay_bucket(pay_status, pay_method=None):
+    """已付款／未付款。已取消、已退款請先排除。不看付款方式、不拆 COD。"""
     status = _preorder_text(pay_status)
     if status == PREORDER_PAID_STATUS:
         return PREORDER_BUCKET_PAID
     if status == PREORDER_UNPAID_STATUS:
-        if is_preorder_cod_pay_method(pay_method):
-            return PREORDER_BUCKET_COD_UNPAID
-        return PREORDER_BUCKET_BANK_UNPAID
+        return PREORDER_BUCKET_UNPAID
     return ""
 
 
@@ -1988,7 +2008,7 @@ def preorder_line_view(df):
 
 
 def prepare_preorder_orders_df(df):
-    """清洗 All Orders：對帳SKU、是否預購、件數、已取消、三欄。不過濾商城。"""
+    """清洗 All Orders：對帳SKU、是否預購、件數、已取消、已退款、付款兩欄。不過濾商城。"""
     if df is None:
         out = pd.DataFrame(columns=list(PREORDER_ORDERS_REQUIRED_COLUMNS))
     else:
@@ -2009,9 +2029,10 @@ def prepare_preorder_orders_df(df):
     out["是預購"] = out["商品名稱"].map(is_preorder_product_name)
     out["商品數量"] = pd.to_numeric(out["商品數量"], errors="coerce").fillna(0)
     out["已取消"] = out["訂單狀態"].map(_preorder_text) == PREORDER_CANCELLED_STATUS
+    out["已退款"] = out["付款狀態"].map(_preorder_text) == PREORDER_REFUNDED_STATUS
     out["三欄"] = [
-        "" if cancelled else classify_preorder_pay_bucket(status, method)
-        for status, method, cancelled in zip(out["付款狀態"], out["付款方式"], out["已取消"])
+        "" if cancelled or refunded else classify_preorder_pay_bucket(status)
+        for status, cancelled, refunded in zip(out["付款狀態"], out["已取消"], out["已退款"])
     ]
     return out
 
@@ -2024,36 +2045,6 @@ def read_preorder_orders_table(file_bytes, filename="orders.xlsx"):
 def _preorder_orders_drive_meta():
     drive = {"ok": False, "name": None, "modified": None, "id": None, "reason": None}
     try:
-        # #region agent log
-        user_folder = "16XCGBr9sE5EOTqNIgZffnARDNCG0fV_m"
-        cfg_folder = ID_PREORDER_ORDERS_FOLDER
-        for fid, label in ((cfg_folder, "configured"), (user_folder, "user_reported")):
-            try:
-                raw = get_drive_service().files().list(
-                    q=f"'{fid}' in parents and trashed = false",
-                    fields="files(id, name, mimeType)",
-                    pageSize=20,
-                ).execute().get("files", [])
-                _agent_debug_log(
-                    "A",
-                    "utils.py:_preorder_orders_drive_meta",
-                    "folder unfiltered list",
-                    {
-                        "label": label,
-                        "folder_id": fid,
-                        "count": len(raw),
-                        "names": [f.get("name") for f in raw],
-                        "mimes": [f.get("mimeType") for f in raw],
-                    },
-                )
-            except Exception as e:
-                _agent_debug_log(
-                    "B",
-                    "utils.py:_preorder_orders_drive_meta",
-                    "folder unfiltered failed",
-                    {"label": label, "folder_id": fid, "err": type(e).__name__, "msg": str(e)[:300]},
-                )
-        # #endregion
         _, latest = pick_latest_source("preorder_orders")
         if latest:
             return {
@@ -2064,24 +2055,8 @@ def _preorder_orders_drive_meta():
                 "reason": None,
             }
         drive["reason"] = "找不到 Orders_DD-MM-YYYY-*.xlsx"
-        # #region agent log
-        _agent_debug_log(
-            "A",
-            "utils.py:_preorder_orders_drive_meta",
-            "latest missing",
-            {"configured_folder": cfg_folder, "latest": None},
-        )
-        # #endregion
     except Exception as e:
         drive["reason"] = _status_error_text(e)
-        # #region agent log
-        _agent_debug_log(
-            "B",
-            "utils.py:_preorder_orders_drive_meta",
-            "meta exception",
-            {"err": type(e).__name__, "msg": str(e)[:300]},
-        )
-        # #endregion
     return drive
 
 
@@ -2146,7 +2121,7 @@ def load_preorder_orders(local_bytes=None, local_name=None, drive=None):
 
 
 def build_preorder_board(campaign_df, orders_df):
-    """依活動 SKU 計名稱含「預購」且未取消的件數，拆三欄並對上限。"""
+    """依活動 SKU 計名稱含「預購」且未取消的件數，拆已付款／未付款並對上限。"""
     campaign = ensure_preorder_campaign_df(campaign_df)
     if orders_df is None:
         orders = prepare_preorder_orders_df(None)
@@ -2189,9 +2164,17 @@ def build_preorder_board(campaign_df, orders_df):
                 return preorder_line_view(None)
             return preorder_line_view(accepted.loc[accepted["三欄"] == key])
 
+        def _paid_pick_lines():
+            if not len(accepted) or "訂單狀態" not in accepted.columns:
+                return preorder_line_view(None)
+            mask = (
+                (accepted["三欄"] == PREORDER_BUCKET_PAID)
+                & (accepted["訂單狀態"].map(_preorder_text) == PREORDER_PENDING_PROCESS_STATUS)
+            )
+            return preorder_line_view(accepted.loc[mask])
+
         paid_qty = _bucket_qty(PREORDER_BUCKET_PAID)
-        cod_qty = _bucket_qty(PREORDER_BUCKET_COD_UNPAID)
-        bank_qty = _bucket_qty(PREORDER_BUCKET_BANK_UNPAID)
+        unpaid_qty = _bucket_qty(PREORDER_BUCKET_UNPAID)
         over = limit is not None and accepted_qty >= limit
         summary_rows.append({
             "月份": month,
@@ -2199,9 +2182,8 @@ def build_preorder_board(campaign_df, orders_df):
             "品名": name,
             "已接單": accepted_qty,
             "上限": "" if limit is None else limit,
-            "Paid 件數": paid_qty,
-            "貨到付款 Unpaid 件數": cod_qty,
-            "銀行 Unpaid 件數": bank_qty,
+            "已付款件數": paid_qty,
+            "未付款件數": unpaid_qty,
             "達上限": "是" if over else "",
         })
         campaigns.append({
@@ -2213,11 +2195,10 @@ def build_preorder_board(campaign_df, orders_df):
             "limit_label": "—" if limit is None else str(limit),
             "over_limit": over,
             "paid_qty": paid_qty,
-            "cod_unpaid_qty": cod_qty,
-            "bank_unpaid_qty": bank_qty,
+            "unpaid_qty": unpaid_qty,
             "paid_lines": _bucket_lines(PREORDER_BUCKET_PAID),
-            "cod_unpaid_lines": _bucket_lines(PREORDER_BUCKET_COD_UNPAID),
-            "bank_unpaid_lines": _bucket_lines(PREORDER_BUCKET_BANK_UNPAID),
+            "unpaid_lines": _bucket_lines(PREORDER_BUCKET_UNPAID),
+            "paid_pick_lines": _paid_pick_lines(),
         })
 
     summary = pd.DataFrame(summary_rows)
@@ -2308,38 +2289,213 @@ def _format_preorder_bank_lines(df):
 
 
 def build_preorder_arrival_copy(board):
-    """第4階：銀行催款可複貼文、貨到付款可打單、Paid 可打單。COD 不進催款文。"""
+    """到貨後：未付款催款文、待處理已付款可打單。不拆 COD。"""
     board = board or {}
-    bank_df = _concat_preorder_bucket_lines(board, "bank_unpaid_lines")
-    cod_df = _concat_preorder_bucket_lines(board, "cod_unpaid_lines")
-    paid_df = _concat_preorder_bucket_lines(board, "paid_lines")
-    bank_lines = _format_preorder_bank_lines(bank_df)
-    if bank_lines:
-        bank_text = (
+    unpaid_df = _concat_preorder_bucket_lines(board, "unpaid_lines")
+    paid_df = _concat_preorder_bucket_lines(board, "paid_pick_lines")
+    unpaid_lines = _format_preorder_bank_lines(unpaid_df)
+    if unpaid_lines:
+        unpaid_text = (
             "【預購到貨・請完成匯款】\n"
-            + "\n".join(bank_lines)
-            + "\n\n付完請回覆，對帳後才打單。貨到付款訂單不必匯款。"
+            + "\n".join(unpaid_lines)
+            + "\n\n付完請回覆，對帳後才打單。"
         )
     else:
-        bank_text = "目前沒有銀行 Unpaid 預購單，不必催款。"
-    cod_lines = _format_preorder_pick_lines(cod_df)
-    if cod_lines:
-        cod_text = "【貨到付款可打單・不催款】\n" + "\n".join(cod_lines)
-    else:
-        cod_text = "目前沒有貨到付款可打單預購單。"
+        unpaid_text = "目前沒有未付款預購單，不必催款。"
     paid_lines = _format_preorder_pick_lines(paid_df)
     if paid_lines:
-        paid_text = "【Paid 可打單】\n" + "\n".join(paid_lines)
+        paid_text = "【可打單・訂單狀態待處理】\n" + "\n".join(paid_lines)
     else:
-        paid_text = "目前沒有 Paid 可打單預購單。"
+        paid_text = "目前沒有待處理且已付款的可打單預購單。"
     return {
-        "bank_reminder": bank_text,
-        "cod_pick": cod_text,
+        "unpaid_reminder": unpaid_text,
         "paid_pick": paid_text,
-        "bank_n": len(bank_lines),
-        "cod_n": len(cod_lines),
+        "unpaid_n": len(unpaid_lines),
         "paid_n": len(paid_lines),
+        "unpaid_lines": unpaid_df,
+        "paid_pick_lines": paid_df,
     }
+
+
+def _parse_preorder_notify_date(val):
+    text = _preorder_text(val)
+    if not text:
+        return None
+    try:
+        return datetime.datetime.strptime(text[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def preorder_notify_days_value(first_date, today=None, unpaid=True, cancelled=False, refunded=False):
+    if cancelled or refunded or not unpaid:
+        return ""
+    parsed = _parse_preorder_notify_date(first_date)
+    if not parsed:
+        return ""
+    today = today or taipei_now().date()
+    return str((today - parsed).days)
+
+
+def extract_preorder_pending_df(orders_df):
+    if orders_df is None or orders_df.empty:
+        return ensure_preorder_pending_df(None)
+    if "對帳SKU" not in orders_df.columns or "是預購" not in orders_df.columns:
+        orders_df = prepare_preorder_orders_df(orders_df)
+    pre = orders_df.loc[orders_df["是預購"]].copy() if "是預購" in orders_df.columns else orders_df.iloc[0:0]
+    return ensure_preorder_pending_df(preorder_line_view(pre))
+
+
+def attach_preorder_notify_days(pending_df, notify_df, today=None):
+    pending = ensure_preorder_pending_df(pending_df)
+    notify = ensure_preorder_notify_df(notify_df)
+    today = today or taipei_now().date()
+    lookup = {}
+    for _, row in notify.iterrows():
+        key = (_preorder_text(row.get("訂單編號")), _preorder_text(row.get("SKU")))
+        if key[0] and key[1] and key not in lookup:
+            lookup[key] = _preorder_text(row.get("首次通知日"))
+    dates = []
+    days = []
+    for _, row in pending.iterrows():
+        key = (_preorder_text(row.get("訂單編號")), _preorder_text(row.get("SKU")))
+        first = lookup.get(key, "")
+        dates.append(first)
+        pay = _preorder_text(row.get("付款狀態"))
+        order_status = _preorder_text(row.get("訂單狀態"))
+        days.append(preorder_notify_days_value(
+            first,
+            today=today,
+            unpaid=pay == PREORDER_UNPAID_STATUS,
+            cancelled=order_status == PREORDER_CANCELLED_STATUS,
+            refunded=pay == PREORDER_REFUNDED_STATUS,
+        ))
+    pending["首次通知日"] = dates
+    pending["已過天數"] = days
+    return pending
+
+
+def upsert_preorder_sku_status(existing_df, pending_df, source_name=""):
+    existing = ensure_preorder_sku_status_df(existing_df)
+    pending = ensure_preorder_pending_df(pending_df)
+    kept = {}
+    for _, row in existing.iterrows():
+        sku = _preorder_text(row.get("SKU"))
+        if sku:
+            kept[sku] = {
+                "SKU": sku,
+                "品名": _preorder_text(row.get("品名")),
+                "件數": row.get("件數"),
+                "狀態": PREORDER_STATUS_ARRIVED if _preorder_text(row.get("狀態")) == PREORDER_STATUS_ARRIVED else PREORDER_STATUS_PREORDER,
+                "來源檔": _preorder_text(row.get("來源檔")),
+            }
+    grouped = {}
+    if len(pending):
+        for _, row in pending.iterrows():
+            sku = _preorder_text(row.get("SKU"))
+            if not sku:
+                continue
+            item = grouped.setdefault(sku, {"品名": "", "qty": 0})
+            name = _preorder_text(row.get("商品名稱"))
+            if name and not item["品名"]:
+                item["品名"] = name
+            if _preorder_text(row.get("訂單狀態")) != PREORDER_CANCELLED_STATUS:
+                item["qty"] += float(pd.to_numeric(row.get("商品數量"), errors="coerce") or 0)
+    source = _preorder_text(source_name)
+    for sku, item in grouped.items():
+        qty = item["qty"]
+        if float(qty).is_integer():
+            qty = int(qty)
+        prev = kept.get(sku, {
+            "SKU": sku,
+            "品名": "",
+            "件數": 0,
+            "狀態": PREORDER_STATUS_PREORDER,
+            "來源檔": "",
+        })
+        prev["品名"] = item["品名"] or prev["品名"]
+        prev["件數"] = qty
+        if source:
+            prev["來源檔"] = source
+        kept[sku] = prev
+    if not kept:
+        return ensure_preorder_sku_status_df(None)
+    out = pd.DataFrame(list(kept.values()))
+    return ensure_preorder_sku_status_df(out)
+
+
+def stamp_preorder_first_notify(notify_df, line_keys, today=None):
+    notify = ensure_preorder_notify_df(notify_df)
+    today_text = (today or taipei_now().date()).strftime("%Y-%m-%d")
+    existing = {}
+    for _, row in notify.iterrows():
+        key = (_preorder_text(row.get("訂單編號")), _preorder_text(row.get("SKU")))
+        if key[0] and key[1]:
+            existing[key] = _preorder_text(row.get("首次通知日"))
+    added = 0
+    for order_no, sku in line_keys or []:
+        order_no = _preorder_text(order_no)
+        sku = _preorder_text(sku)
+        if not order_no or not sku:
+            continue
+        key = (order_no, sku)
+        if existing.get(key):
+            continue
+        existing[key] = today_text
+        added += 1
+    rows = [{"訂單編號": k[0], "SKU": k[1], "首次通知日": v} for k, v in existing.items()]
+    out = pd.DataFrame(rows) if rows else None
+    return {"notify": ensure_preorder_notify_df(out), "added": added, "today": today_text}
+
+
+def preorder_notify_keys_from_lines(df):
+    keys = []
+    seen = set()
+    if df is None or getattr(df, "empty", True):
+        return keys
+    for _, row in df.iterrows():
+        key = (_preorder_text(row.get("訂單編號")), _preorder_text(row.get("SKU")))
+        if key[0] and key[1] and key not in seen:
+            seen.add(key)
+            keys.append(key)
+    return keys
+
+
+def campaign_df_from_arrived_skus(sku_status_df):
+    status = ensure_preorder_sku_status_df(sku_status_df)
+    rows = []
+    for _, row in status.iterrows():
+        sku = _preorder_text(row.get("SKU"))
+        if not sku or _preorder_text(row.get("狀態")) != PREORDER_STATUS_ARRIVED:
+            continue
+        rows.append({
+            "月份": "",
+            "結單日": "",
+            "SKU": sku,
+            "條碼": "",
+            "貨號": "",
+            "品名": _preorder_text(row.get("品名")),
+            "廠商檔名": "",
+            "自購": "",
+            "上限": "",
+            "私密連結": "",
+            "預計關閉": "",
+            "實際關閉": "",
+        })
+    if not rows:
+        return ensure_preorder_campaign_df(None).iloc[0:0]
+    return ensure_preorder_campaign_df(pd.DataFrame(rows))
+
+
+def arrived_skus_missing_from_campaign(sku_status_df, campaign_df):
+    campaign = ensure_preorder_campaign_df(campaign_df)
+    camp = set(_preorder_text(v) for v in campaign["SKU"].tolist() if _preorder_text(v))
+    missing = []
+    for _, row in ensure_preorder_sku_status_df(sku_status_df).iterrows():
+        sku = _preorder_text(row.get("SKU"))
+        if sku and _preorder_text(row.get("狀態")) == PREORDER_STATUS_ARRIVED and sku not in camp:
+            missing.append(sku)
+    return missing
 
 
 def duplicate_preorder_skus(campaign_df):
