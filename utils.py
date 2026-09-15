@@ -100,7 +100,19 @@ PREORDER_CAMPAIGN_COLUMNS = (
     "結單日",
     "SKU",
     "條碼",
+    "貨號",
     "品名",
+    "廠商檔名",
+    "自購",
+    "上限",
+    "私密連結",
+    "預計關閉",
+    "實際關閉",
+)
+PREORDER_CAMPAIGN_PROTECTED_COLUMNS = (
+    "月份",
+    "結單日",
+    "SKU",
     "自購",
     "上限",
     "私密連結",
@@ -111,12 +123,60 @@ PREORDER_VENDOR_HISTORY_COLUMNS = (
     "活動月份",
     "SKU",
     "條碼",
+    "貨號",
+    "廠商檔名",
     "自購",
     "客戶量",
     "上限",
     "鎖定數量",
     "鎖定時間",
     "備註",
+)
+PREORDER_VENDOR_BARCODE_HEADERS = (
+    "barcode",
+    "條碼",
+    "國際條碼",
+    "條碼編號",
+    "gtin",
+    "ean",
+    "upc",
+    "jan",
+)
+PREORDER_VENDOR_ITEM_HEADERS = (
+    "貨號",
+    "商品編號",
+    "品號",
+    "品番",
+)
+PREORDER_VENDOR_NAME_HEADERS = (
+    "中文",
+    "品名",
+    "商品名稱",
+    "商品名",
+)
+PREORDER_VENDOR_QTY_HEADERS_PREFERRED = (
+    "訂量",
+    "訂購量",
+    "訂購數量",
+)
+PREORDER_VENDOR_QTY_HEADERS_FALLBACK = (
+    "數量",
+)
+PREORDER_RESTOCK_SKU_HEADERS = (
+    "isku",
+    "i sku",
+    "item sku",
+    "庫存sku",
+    "庫存 sku",
+    "sku",
+)
+PREORDER_RESTOCK_QTY_HEADERS = (
+    "quantity",
+    "qty",
+    "restock quantity",
+    "restock qty",
+    "數量",
+    "訂量",
 )
 PREORDER_ORDERS_REQUIRED_COLUMNS = (
     "訂單編號",
@@ -1579,6 +1639,10 @@ def ensure_preorder_campaign_df(df):
     out = ensure_columns(df, PREORDER_CAMPAIGN_COLUMNS)
     if "條碼" in out.columns:
         out["條碼"] = out["條碼"].map(clean_barcode)
+    if "貨號" in out.columns:
+        out["貨號"] = out["貨號"].map(_preorder_text)
+    if "廠商檔名" in out.columns:
+        out["廠商檔名"] = out["廠商檔名"].map(_preorder_text)
     for col in ("自購", "上限"):
         if col in out.columns:
             out[col] = pd.to_numeric(out[col], errors="coerce")
@@ -1681,8 +1745,10 @@ def preorder_tracker_bytes(campaign_df, vendor_history_df=None, other_sheets=Non
                 continue
             (df if df is not None else pd.DataFrame()).to_excel(writer, index=False, sheet_name=safe)
         ws = writer.sheets[PREORDER_CAMPAIGN_SHEET]
-        if "條碼" in campaign.columns:
-            col_idx = list(campaign.columns).index("條碼") + 1
+        for col_name in ("條碼", "貨號"):
+            if col_name not in campaign.columns:
+                continue
+            col_idx = list(campaign.columns).index(col_name) + 1
             for row_idx in range(2, len(campaign) + 2):
                 ws.cell(row=row_idx, column=col_idx).number_format = "@"
     return buf.getvalue()
@@ -1994,6 +2060,417 @@ def build_preorder_board(campaign_df, orders_df):
         "order_rows": int(len(orders)),
         "preorder_rows": int(len(board_orders)),
         "campaign_skus": [s for s in camp_skus if s],
+    }
+
+
+def duplicate_preorder_skus(campaign_df):
+    campaign = ensure_preorder_campaign_df(campaign_df)
+    skus = [_preorder_text(v) for v in campaign["SKU"].tolist()]
+    counts = {}
+    for sku in skus:
+        if not sku:
+            continue
+        counts[sku] = counts.get(sku, 0) + 1
+    return [sku for sku, n in counts.items() if n > 1]
+
+
+def _preorder_self_buy(val):
+    n = pd.to_numeric(val, errors="coerce")
+    if pd.isna(n):
+        return 0
+    n = float(n)
+    if n.is_integer():
+        return int(n)
+    return n
+
+
+def preorder_locked_qty(self_buy, customer_qty, limit):
+    buy = _preorder_self_buy(self_buy)
+    cust = customer_qty or 0
+    if limit is None:
+        return buy + cust
+    return buy + min(cust, limit)
+
+
+def _norm_vendor_header(val):
+    text = _preorder_text(val).lower().replace("　", " ")
+    return " ".join(text.split())
+
+
+def _header_in(names, aliases):
+    alias_set = {_norm_vendor_header(a) for a in aliases}
+    for idx, name in enumerate(names):
+        if _norm_vendor_header(name) in alias_set:
+            return idx
+    return None
+
+
+def _cell_plain(val):
+    if val is None:
+        return ""
+    if getattr(val, "value", None) is not None and not isinstance(val, (str, int, float)):
+        val = val.value
+    return _preorder_text(val)
+
+
+def _openpyxl_row_values(ws, row_idx, max_col):
+    return [ws.cell(row=row_idx, column=c).value for c in range(1, max_col + 1)]
+
+
+def _find_vendor_header_map(values):
+    names = [_cell_plain(v) for v in values]
+    if not any(names):
+        return None
+    qty_idx = _header_in(names, PREORDER_VENDOR_QTY_HEADERS_PREFERRED)
+    if qty_idx is None:
+        qty_idx = _header_in(names, PREORDER_VENDOR_QTY_HEADERS_FALLBACK)
+    barcode_idx = _header_in(names, PREORDER_VENDOR_BARCODE_HEADERS)
+    item_idx = _header_in(names, PREORDER_VENDOR_ITEM_HEADERS)
+    name_idx = _header_in(names, PREORDER_VENDOR_NAME_HEADERS)
+    if qty_idx is None:
+        return None
+    if barcode_idx is None and item_idx is None:
+        return None
+    return {
+        "qty": qty_idx,
+        "barcode": barcode_idx,
+        "item": item_idx,
+        "name": name_idx,
+        "width": len(names),
+    }
+
+
+def parse_vendor_po_bytes(file_bytes, filename="vendor.xlsx"):
+    """讀廠商訂購單商品列。表頭不一定在第 1 列；條碼可空。"""
+    payload = file_bytes if isinstance(file_bytes, (bytes, bytearray)) else bytes(file_bytes or b"")
+    name = filename or "vendor.xlsx"
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(payload), data_only=True)
+    except Exception as e:
+        return {"ok": False, "reason": f"無法開啟廠商檔，請另存 xlsx。{e}", "filename": name}
+
+    rows = []
+    headers_found = []
+    for ws in wb.worksheets:
+        max_col = min(ws.max_column or 1, 40)
+        header_row = None
+        header_map = None
+        scan_to = min(ws.max_row or 1, 20)
+        for r in range(1, scan_to + 1):
+            found = _find_vendor_header_map(_openpyxl_row_values(ws, r, max_col))
+            if found:
+                header_row = r
+                header_map = found
+                break
+        if not header_map:
+            continue
+        headers_found.append(ws.title)
+        max_row = ws.max_row or header_row
+        for r in range(header_row + 1, max_row + 1):
+            vals = _openpyxl_row_values(ws, r, max(header_map["width"], max_col))
+            barcode = clean_barcode(vals[header_map["barcode"]]) if header_map["barcode"] is not None else ""
+            item_no = _preorder_text(vals[header_map["item"]]) if header_map["item"] is not None else ""
+            pname = _preorder_text(vals[header_map["name"]]) if header_map["name"] is not None else ""
+            if not barcode and not item_no and not pname:
+                continue
+            rows.append({
+                "sheet": ws.title,
+                "row": r,
+                "貨號": item_no,
+                "品名": pname,
+                "條碼": barcode,
+                "勾選": True,
+            })
+    if not rows and not headers_found:
+        return {
+            "ok": False,
+            "reason": "找不到同時有訂量（或數量）與條碼／貨號的表頭。",
+            "filename": name,
+        }
+    preview = pd.DataFrame(rows, columns=["勾選", "貨號", "品名", "條碼", "sheet", "row"])
+    if preview.empty:
+        preview = pd.DataFrame(columns=["勾選", "貨號", "品名", "條碼", "sheet", "row"])
+    return {
+        "ok": True,
+        "filename": name,
+        "sheets": headers_found,
+        "preview": preview,
+        "rows": rows,
+    }
+
+
+def _campaign_match_index(campaign, barcode, item_no, pname, filename):
+    if barcode:
+        hits = [i for i, val in enumerate(campaign["條碼"].tolist()) if clean_barcode(val) == barcode]
+        if hits:
+            return hits[0]
+    if item_no:
+        hits = [
+            i for i, (fn, code) in enumerate(zip(campaign["廠商檔名"].tolist(), campaign["貨號"].tolist()))
+            if _preorder_text(fn) == filename and _preorder_text(code) == item_no
+        ]
+        if hits:
+            return hits[0]
+    if pname:
+        hits = [
+            i for i, (fn, name) in enumerate(zip(campaign["廠商檔名"].tolist(), campaign["品名"].tolist()))
+            if _preorder_text(fn) == filename and _preorder_text(name) == pname
+        ]
+        if hits:
+            return hits[0]
+    return None
+
+
+def upsert_vendor_rows_into_campaign(campaign_df, selected_rows, filename):
+    """勾選列寫入活動表。空條碼可匯入。不覆蓋 SKU／自購／上限等營運欄。"""
+    campaign = ensure_preorder_campaign_df(campaign_df)
+    filename = _preorder_text(filename)
+    reports = []
+    added = 0
+    updated = 0
+    for item in selected_rows or []:
+        barcode = clean_barcode(item.get("條碼"))
+        item_no = _preorder_text(item.get("貨號"))
+        pname = _preorder_text(item.get("品名"))
+        if not barcode and not item_no and not pname:
+            reports.append("無條碼／貨號／品名，仍新增一列。")
+        idx = _campaign_match_index(campaign, barcode, item_no, pname, filename)
+        if idx is None:
+            new_row = {col: "" for col in PREORDER_CAMPAIGN_COLUMNS}
+            new_row["條碼"] = barcode
+            new_row["貨號"] = item_no
+            new_row["品名"] = pname
+            new_row["廠商檔名"] = filename
+            campaign = pd.concat([campaign, pd.DataFrame([new_row])], ignore_index=True)
+            campaign = ensure_preorder_campaign_df(campaign)
+            added += 1
+            continue
+        campaign.at[idx, "廠商檔名"] = filename or campaign.at[idx, "廠商檔名"]
+        if item_no:
+            campaign.at[idx, "貨號"] = item_no
+        if pname:
+            campaign.at[idx, "品名"] = pname
+        if barcode:
+            campaign.at[idx, "條碼"] = barcode
+        updated += 1
+    return {
+        "campaign": ensure_preorder_campaign_df(campaign),
+        "added": added,
+        "updated": updated,
+        "reports": reports,
+    }
+
+
+def lock_preorder_campaign(campaign_df, orders_df, close_date=None, lock_time=None):
+    """鎖定有 SKU 的列。訂量 = 自購 + min(客戶量, 上限)。上限空＝不封頂。"""
+    campaign = ensure_preorder_campaign_df(campaign_df)
+    board = build_preorder_board(campaign, orders_df)
+    qty_by_sku = {c["sku"]: c["accepted_qty"] for c in board["campaigns"] if c["sku"]}
+    lock_time = lock_time or taipei_now().strftime("%Y-%m-%d %H:%M")
+    close_date = _preorder_text(close_date)
+    skipped = []
+    locked_rows = []
+    out = campaign.copy()
+    for idx, camp in out.iterrows():
+        sku = _preorder_text(camp.get("SKU"))
+        if not sku:
+            skipped.append({
+                "index": int(idx),
+                "品名": _preorder_text(camp.get("品名")),
+                "條碼": clean_barcode(camp.get("條碼")),
+                "貨號": _preorder_text(camp.get("貨號")),
+                "原因": "未填 SKU，不計客戶量、不鎖定",
+            })
+            continue
+        customer_qty = qty_by_sku.get(sku, 0)
+        limit = _preorder_limit_value(camp.get("上限"))
+        self_buy = _preorder_self_buy(camp.get("自購"))
+        locked_qty = preorder_locked_qty(self_buy, customer_qty, limit)
+        if close_date:
+            out.at[idx, "實際關閉"] = close_date
+        locked_rows.append({
+            "index": int(idx),
+            "活動月份": _preorder_text(camp.get("月份")),
+            "SKU": sku,
+            "條碼": clean_barcode(camp.get("條碼")),
+            "貨號": _preorder_text(camp.get("貨號")),
+            "廠商檔名": _preorder_text(camp.get("廠商檔名")),
+            "品名": _preorder_text(camp.get("品名")),
+            "自購": self_buy,
+            "客戶量": customer_qty,
+            "上限": "" if limit is None else limit,
+            "鎖定數量": locked_qty,
+            "鎖定時間": lock_time,
+            "備註": "",
+        })
+    history_add = pd.DataFrame(locked_rows)
+    if not history_add.empty:
+        history_add = ensure_preorder_vendor_history_df(history_add)
+    else:
+        history_add = ensure_preorder_vendor_history_df(None)
+    return {
+        "campaign": ensure_preorder_campaign_df(out),
+        "locked_rows": locked_rows,
+        "history_add": history_add,
+        "skipped": skipped,
+        "duplicate_skus": duplicate_preorder_skus(out),
+        "lock_time": lock_time,
+    }
+
+
+def append_preorder_vendor_history(history_df, history_add):
+    base = ensure_preorder_vendor_history_df(history_df)
+    extra = ensure_preorder_vendor_history_df(history_add)
+    if extra.empty:
+        return base
+    return ensure_preorder_vendor_history_df(pd.concat([base, extra], ignore_index=True))
+
+
+def _match_locked_to_vendor_row(locked_rows, barcode, item_no):
+    if barcode:
+        for row in locked_rows:
+            if clean_barcode(row.get("條碼")) == barcode:
+                return row
+    if item_no:
+        for row in locked_rows:
+            if not clean_barcode(row.get("條碼")) and _preorder_text(row.get("貨號")) == item_no:
+                return row
+        for row in locked_rows:
+            if _preorder_text(row.get("貨號")) == item_no:
+                return row
+    return None
+
+
+def fill_vendor_po_qty_bytes(file_bytes, locked_rows, filename="vendor.xlsx"):
+    """只改訂量儲存格，保留版面與圖。先條碼、沒條碼再貨號。"""
+    payload = file_bytes if isinstance(file_bytes, (bytes, bytearray)) else bytes(file_bytes or b"")
+    name = filename or "vendor.xlsx"
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(payload))
+    except Exception as e:
+        return {"ok": False, "reason": f"無法開啟廠商檔，請另存 xlsx。{e}", "filename": name}
+
+    filled = 0
+    vendor_unmatched = []
+    used_keys = set()
+    for ws in wb.worksheets:
+        max_col = min(ws.max_column or 1, 40)
+        header_map = None
+        header_row = None
+        scan_to = min(ws.max_row or 1, 20)
+        for r in range(1, scan_to + 1):
+            found = _find_vendor_header_map(_openpyxl_row_values(ws, r, max_col))
+            if found:
+                header_map = found
+                header_row = r
+                break
+        if not header_map:
+            continue
+        qty_col = header_map["qty"] + 1
+        max_row = ws.max_row or header_row
+        for r in range(header_row + 1, max_row + 1):
+            vals = _openpyxl_row_values(ws, r, max(header_map["width"], max_col))
+            barcode = clean_barcode(vals[header_map["barcode"]]) if header_map["barcode"] is not None else ""
+            item_no = _preorder_text(vals[header_map["item"]]) if header_map["item"] is not None else ""
+            pname = _preorder_text(vals[header_map["name"]]) if header_map["name"] is not None else ""
+            if not barcode and not item_no and not pname:
+                continue
+            matched = _match_locked_to_vendor_row(locked_rows, barcode, item_no)
+            if not matched:
+                vendor_unmatched.append({
+                    "sheet": ws.title,
+                    "row": r,
+                    "貨號": item_no,
+                    "品名": pname,
+                    "條碼": barcode,
+                    "原因": "活動表沒有對應列或該列未鎖定",
+                })
+                continue
+            key = (matched.get("SKU"), matched.get("條碼"), matched.get("貨號"))
+            used_keys.add(key)
+            ws.cell(row=r, column=qty_col).value = matched.get("鎖定數量")
+            filled += 1
+
+    campaign_unmatched = []
+    for row in locked_rows:
+        key = (row.get("SKU"), row.get("條碼"), row.get("貨號"))
+        if key in used_keys:
+            continue
+        campaign_unmatched.append({
+            "SKU": row.get("SKU"),
+            "條碼": row.get("條碼"),
+            "貨號": row.get("貨號"),
+            "品名": row.get("品名"),
+            "原因": "廠商檔對不到條碼或貨號",
+        })
+
+    out = io.BytesIO()
+    wb.save(out)
+    stem = name.rsplit(".", 1)[0] if "." in name else name
+    out_name = f"{stem}_訂量.xlsx"
+    return {
+        "ok": True,
+        "bytes": out.getvalue(),
+        "filename": out_name,
+        "filled": filled,
+        "vendor_unmatched": vendor_unmatched,
+        "campaign_unmatched": campaign_unmatched,
+    }
+
+
+def _find_restock_header_map(values):
+    names = [_cell_plain(v) for v in values]
+    sku_idx = _header_in(names, PREORDER_RESTOCK_SKU_HEADERS)
+    qty_idx = _header_in(names, PREORDER_RESTOCK_QTY_HEADERS)
+    if sku_idx is None or qty_idx is None:
+        return None
+    return {"sku": sku_idx, "qty": qty_idx, "width": max(len(names), sku_idx + 1, qty_idx + 1)}
+
+
+def fill_sg_restock_bytes(template_bytes, locked_rows, filename="import_restock.xlsx"):
+    """複製官方空殼填 iSKU + 鎖定數量。呼叫端禁止 update Drive 空殼 file id。"""
+    payload = template_bytes if isinstance(template_bytes, (bytes, bytearray)) else bytes(template_bytes or b"")
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(payload))
+    except Exception as e:
+        return {"ok": False, "reason": f"無法開啟 Restock 空殼。{e}"}
+
+    target = None
+    for ws in wb.worksheets:
+        max_col = min(ws.max_column or 1, 40)
+        scan_to = min(ws.max_row or 1, 20)
+        for r in range(1, scan_to + 1):
+            found = _find_restock_header_map(_openpyxl_row_values(ws, r, max_col))
+            if found:
+                target = (ws, r, found)
+                break
+        if target:
+            break
+    if not target:
+        return {"ok": False, "reason": "Restock 空殼找不到 iSKU／數量表頭。"}
+
+    ws, header_row, header_map = target
+    sku_col = header_map["sku"] + 1
+    qty_col = header_map["qty"] + 1
+    start = header_row + 1
+    old_last = ws.max_row or header_row
+    if old_last > header_row:
+        ws.delete_rows(start, old_last - header_row)
+    for offset, row in enumerate(locked_rows or []):
+        ws.cell(row=start + offset, column=sku_col).value = row.get("SKU")
+        ws.cell(row=start + offset, column=qty_col).value = row.get("鎖定數量")
+        ws.cell(row=start + offset, column=sku_col).number_format = "@"
+
+    out = io.BytesIO()
+    wb.save(out)
+    stamp = taipei_now().strftime("%Y%m%d")
+    out_name = f"sitegiant_restock_preorder_{stamp}.xlsx"
+    return {
+        "ok": True,
+        "bytes": out.getvalue(),
+        "filename": out_name,
+        "rows": len(locked_rows or []),
+        "template_name": filename,
     }
 
 
