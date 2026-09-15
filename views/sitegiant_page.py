@@ -47,11 +47,14 @@ from utils import (
     parse_vendor_po_bytes,
     upsert_vendor_rows_into_campaign,
     duplicate_preorder_skus,
+    preorder_rows_sku_equals_item_no,
     lock_preorder_campaign,
     append_preorder_vendor_history,
     fill_vendor_po_qty_bytes,
     fill_sg_restock_bytes,
     taipei_now,
+    PREORDER_CAMPAIGN_COLUMNS,
+    PREORDER_VENDOR_HISTORY_COLUMNS,
 )
 
 def _inward_excel_bytes(df, sheet_name="SiteGiant入庫單"):
@@ -213,8 +216,8 @@ def _render_preorder_orders_board(campaign_df):
 def _render_preorder_vendor_import(campaign_df):
     st.subheader("📥 從廠商訂購單匯入活動列（第3階）")
     st.info(
-        "上傳後勾選要跟的款再寫入活動表。**沒條碼只要勾選也會匯入。** "
-        "對到既有列只更新廠商檔名／貨號／品名／條碼，不會覆蓋 SKU、自購、上限、私密連結、結單日。"
+        "上傳後勾選要跟的款再寫入活動表。**只帶入廠商檔名、貨號、品名、條碼。不會從廠商單或商品清單帶入庫存 SKU。** "
+        "沒條碼只要勾選也會匯入。若條碼／貨號已在活動表，會保留該列原本的 SKU、自購、上限。"
         " 售價與圖片不會匯入。結單回填訂量請用同一份原檔。"
     )
     uploaded = st.file_uploader(
@@ -267,6 +270,7 @@ def _render_preorder_vendor_import(campaign_df):
             return campaign_df
         result = upsert_vendor_rows_into_campaign(campaign_df, selected, uploaded.name)
         st.session_state["preorder_campaign_df"] = result["campaign"]
+        st.session_state.pop("preorder_campaign_editor_v3", None)
         st.session_state.pop("preorder_campaign_editor_v2", None)
         st.session_state.pop("preorder_campaign_editor", None)
         st.session_state["preorder_vendor_import_msg"] = (
@@ -279,6 +283,7 @@ def _render_preorder_vendor_import(campaign_df):
 
 
 def _render_preorder_close(campaign_df, orders_df):
+    campaign_df = st.session_state.get("preorder_campaign_df", campaign_df)
     st.subheader("🔒 結單鎖定與兩檔下載（第3階）")
     st.info(
         "鎖定數量 = 自購 + min(客戶量, 上限)。上限空＝不封頂；自購空＝0。"
@@ -300,6 +305,7 @@ def _render_preorder_close(campaign_df, orders_df):
             st.session_state.get("preorder_vendor_history_before_lock"),
             result.get("history_add"),
         )
+        st.session_state.pop("preorder_campaign_editor_v3", None)
         st.session_state.pop("preorder_campaign_editor_v2", None)
         st.session_state.pop("preorder_campaign_editor", None)
         st.session_state.pop("preorder_vendor_fill", None)
@@ -396,7 +402,10 @@ def _render_preorder_close(campaign_df, orders_df):
     hist = st.session_state.get("preorder_vendor_history_df")
     if hist is not None and len(hist):
         with st.expander(f"廠商單歷史（{len(hist)} 列）"):
-            st.dataframe(hist, hide_index=True, use_container_width=True)
+            show = hist.copy()
+            cols = [c for c in PREORDER_VENDOR_HISTORY_COLUMNS if c in show.columns]
+            extras = [c for c in show.columns if c not in cols]
+            st.dataframe(show[cols + extras], hide_index=True, use_container_width=True)
 
 
 def _xlsx_filename(name):
@@ -1271,6 +1280,7 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
         if reload or "preorder_loaded" not in st.session_state:
             if reload:
                 get_cached_gdrive_file_bytes.clear()
+                st.session_state.pop("preorder_campaign_editor_v3", None)
                 st.session_state.pop("preorder_campaign_editor_v2", None)
                 st.session_state.pop("preorder_campaign_editor", None)
                 st.session_state.pop("preorder_orders_loaded", None)
@@ -1304,12 +1314,13 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
             num_rows="dynamic",
             use_container_width=True,
             hide_index=True,
+            column_order=list(PREORDER_CAMPAIGN_COLUMNS),
             column_config={
                 "月份": st.column_config.TextColumn("月份", help="YYYY-MM"),
                 "結單日": st.column_config.TextColumn("結單日", help="YYYY-MM-DD"),
-                "SKU": st.column_config.TextColumn("SKU", help="自定義編碼／庫存 SKU；四款請填四個不同 SKU"),
+                "SKU": st.column_config.TextColumn("SKU", help="自定義編碼／庫存 SKU；四款請填四個不同 SKU。匯入廠商單不會填這欄。"),
                 "條碼": st.column_config.TextColumn("條碼", help="GTIN／c"),
-                "貨號": st.column_config.TextColumn("貨號", help="廠商貨號"),
+                "貨號": st.column_config.TextColumn("貨號", help="廠商貨號（來自訂購單，不是庫存 SKU）"),
                 "品名": st.column_config.TextColumn("品名"),
                 "廠商檔名": st.column_config.TextColumn("廠商檔名", help="來源訂購單檔名"),
                 "自購": st.column_config.NumberColumn("自購", min_value=0, step=1),
@@ -1318,12 +1329,19 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
                 "預計關閉": st.column_config.TextColumn("預計關閉", help="預計結單日"),
                 "實際關閉": st.column_config.TextColumn("實際關閉", help="實際關掉接受缺貨的時間"),
             },
-            key="preorder_campaign_editor_v2",
+            key="preorder_campaign_editor_v3",
         )
         st.session_state["preorder_campaign_df"] = edited
         dups = duplicate_preorder_skus(edited)
         if dups:
             st.warning("同一 SKU 出現在多列，看板客戶量會重複加總：" + "、".join(f"`{s}`" for s in dups))
+        sku_as_item = preorder_rows_sku_equals_item_no(edited)
+        if sku_as_item:
+            st.warning(
+                "有列的 SKU 與廠商貨號相同（"
+                + "、".join(f"`{s}`" for s in sku_as_item)
+                + "）。庫存 SKU 請填 SiteGiant／蝦皮自定義編碼，貨號請留在「貨號」欄。"
+            )
 
         edited = _render_preorder_vendor_import(edited)
         st.session_state["preorder_campaign_df"] = edited

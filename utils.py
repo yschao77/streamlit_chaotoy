@@ -1650,7 +1650,11 @@ def ensure_preorder_campaign_df(df):
 
 
 def ensure_preorder_vendor_history_df(df):
-    return ensure_columns(df, PREORDER_VENDOR_HISTORY_COLUMNS)
+    out = ensure_columns(df, PREORDER_VENDOR_HISTORY_COLUMNS)
+    for col in ("自購", "客戶量", "上限", "鎖定數量"):
+        if col in out.columns:
+            out[col] = pd.to_numeric(out[col], errors="coerce")
+    return out
 
 
 def _preorder_tracker_not_xlsx_reason(mime, name):
@@ -2074,6 +2078,18 @@ def duplicate_preorder_skus(campaign_df):
     return [sku for sku, n in counts.items() if n > 1]
 
 
+def preorder_rows_sku_equals_item_no(campaign_df):
+    """SKU 被填成廠商貨號時提出警告（常見於活動表欄位移位）。"""
+    campaign = ensure_preorder_campaign_df(campaign_df)
+    hits = []
+    for _, row in campaign.iterrows():
+        sku = _preorder_text(row.get("SKU"))
+        item_no = _preorder_text(row.get("貨號"))
+        if sku and item_no and sku == item_no:
+            hits.append(sku)
+    return hits
+
+
 def _preorder_self_buy(val):
     n = pd.to_numeric(val, errors="coerce")
     if pd.isna(n):
@@ -2241,10 +2257,13 @@ def upsert_vendor_rows_into_campaign(campaign_df, selected_rows, filename):
             new_row["貨號"] = item_no
             new_row["品名"] = pname
             new_row["廠商檔名"] = filename
+            new_row["SKU"] = ""
             campaign = pd.concat([campaign, pd.DataFrame([new_row])], ignore_index=True)
             campaign = ensure_preorder_campaign_df(campaign)
+            campaign.at[len(campaign) - 1, "SKU"] = ""
             added += 1
             continue
+        kept_sku = _preorder_text(campaign.at[idx, "SKU"])
         campaign.at[idx, "廠商檔名"] = filename or campaign.at[idx, "廠商檔名"]
         if item_no:
             campaign.at[idx, "貨號"] = item_no
@@ -2253,6 +2272,8 @@ def upsert_vendor_rows_into_campaign(campaign_df, selected_rows, filename):
         if barcode:
             campaign.at[idx, "條碼"] = barcode
         updated += 1
+        if kept_sku:
+            reports.append(f"條碼／貨號已在活動表，保留原 SKU `{kept_sku}`（不是廠商貨號）。")
     return {
         "campaign": ensure_preorder_campaign_df(campaign),
         "added": added,
@@ -2272,30 +2293,30 @@ def lock_preorder_campaign(campaign_df, orders_df, close_date=None, lock_time=No
     locked_rows = []
     out = campaign.copy()
     for idx, camp in out.iterrows():
-        sku = _preorder_text(camp.get("SKU"))
+        sku = _preorder_text(out.at[idx, "SKU"]) if "SKU" in out.columns else ""
         if not sku:
             skipped.append({
                 "index": int(idx),
-                "品名": _preorder_text(camp.get("品名")),
-                "條碼": clean_barcode(camp.get("條碼")),
-                "貨號": _preorder_text(camp.get("貨號")),
+                "品名": _preorder_text(out.at[idx, "品名"]) if "品名" in out.columns else "",
+                "條碼": clean_barcode(out.at[idx, "條碼"]) if "條碼" in out.columns else "",
+                "貨號": _preorder_text(out.at[idx, "貨號"]) if "貨號" in out.columns else "",
                 "原因": "未填 SKU，不計客戶量、不鎖定",
             })
             continue
         customer_qty = qty_by_sku.get(sku, 0)
-        limit = _preorder_limit_value(camp.get("上限"))
-        self_buy = _preorder_self_buy(camp.get("自購"))
+        limit = _preorder_limit_value(out.at[idx, "上限"] if "上限" in out.columns else None)
+        self_buy = _preorder_self_buy(out.at[idx, "自購"] if "自購" in out.columns else 0)
         locked_qty = preorder_locked_qty(self_buy, customer_qty, limit)
         if close_date:
             out.at[idx, "實際關閉"] = close_date
         locked_rows.append({
             "index": int(idx),
-            "活動月份": _preorder_text(camp.get("月份")),
+            "活動月份": _preorder_text(out.at[idx, "月份"]) if "月份" in out.columns else "",
             "SKU": sku,
-            "條碼": clean_barcode(camp.get("條碼")),
-            "貨號": _preorder_text(camp.get("貨號")),
-            "廠商檔名": _preorder_text(camp.get("廠商檔名")),
-            "品名": _preorder_text(camp.get("品名")),
+            "條碼": clean_barcode(out.at[idx, "條碼"]) if "條碼" in out.columns else "",
+            "貨號": _preorder_text(out.at[idx, "貨號"]) if "貨號" in out.columns else "",
+            "廠商檔名": _preorder_text(out.at[idx, "廠商檔名"]) if "廠商檔名" in out.columns else "",
+            "品名": _preorder_text(out.at[idx, "品名"]) if "品名" in out.columns else "",
             "自購": self_buy,
             "客戶量": customer_qty,
             "上限": "" if limit is None else limit,
