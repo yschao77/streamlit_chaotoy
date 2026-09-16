@@ -88,6 +88,7 @@ ID_DOWNLOAD_ROOT = "1U0tRNz1j62ouKwtT9s-OlrtmBQGlQ5bU"
 ID_PRICE_SUMMARY_FALLBACK = "1d2a6D6-9LV6oBhlwXjb_9xm5TYN80sPd"
 ID_HISTORY_INWARD_INDEX = "12YbAlXcOdM3lFYFkh7a82yZZe7KotRNe"
 ID_PREORDER_ORDERS_FOLDER = "16XCGBr9sE5EOTqNIgZffnARDNCG0fV_m"
+ID_SITEGIANT_ALL_ORDERS_FOLDER = "1AAJ_zxEfffL24QBniL0tz_9CIhzYzCEK"
 ID_PREORDER_TRACKER = "1aqfHIPvavWZhtLZMdFCOnyHtllHLrca-"
 ID_SG_RESTOCK_TEMPLATE = "1QZ-_PI3T2BtHjTwmrIAEG_RZKDlxhpqt"  # SiteGiant 採購單空殼；後台 Import Restock；禁止 update
 UPC_FILLED_FILENAME = "batch_edit_upc_added_only.xlsx"
@@ -406,11 +407,11 @@ TRACKED_SOURCES = (
     {
         "key": "preorder_orders",
         "folder": "Sitegiant_Preorder_Orders",
-        "folder_id": ID_PREORDER_ORDERS_FOLDER,
+        "folder_id": ID_SITEGIANT_ALL_ORDERS_FOLDER,
         "name_contains": "Orders_",
         "kind": "dmy",
-        "pattern": "Orders_DD-MM-YYYY-*.xlsx",
-        "include_zip": False,
+        "pattern": "Orders_DD-MM-YYYY-*.zip（內含 xlsx）",
+        "include_zip": True,
         "consumed": True,
     },
     {
@@ -1054,22 +1055,34 @@ def _parse_named_file_date(name, kind):
     return None
 
 
+def _file_name_tail_seq(name):
+    """檔名結尾流水號，例如 Orders_16-09-2026-1789531035.zip → 1789531035。"""
+    m = re.search(r"-(\d+)(?:\.(?:zip|xlsx|xls|csv))?$", str(name or ""), re.I)
+    if not m:
+        return 0
+    try:
+        return int(m.group(1))
+    except ValueError:
+        return 0
+
+
 def _rank_latest_file(files, kind):
     kind = _normalize_kind(kind)
     ranked = []
     for f in files:
         file_date = _parse_named_file_date(f.get("name"), kind)
+        seq = _file_name_tail_seq(f.get("name"))
         if file_date:
-            ranked.append((file_date, f.get("modifiedTime") or "", f))
+            ranked.append((file_date, seq, f.get("modifiedTime") or "", f))
         elif kind == "keyword":
-            ranked.append((datetime.datetime.min, f.get("modifiedTime") or "", f))
+            ranked.append((datetime.datetime.min, seq, f.get("modifiedTime") or "", f))
     if not ranked:
         if kind == "keyword" and files:
             files = sorted(files, key=lambda x: x.get("modifiedTime") or "", reverse=True)
             return files[0]
         return None
-    ranked.sort(key=lambda x: (x[0], x[1]), reverse=True)
-    return ranked[0][2]
+    ranked.sort(key=lambda x: (x[0], x[1], x[2]), reverse=True)
+    return ranked[0][3]
 
 
 def pick_latest_gdrive_file(folder_id, name_contains, kind, include_zip=None):
@@ -1089,6 +1102,15 @@ def resolve_named_file(folder_id, keyword):
     return files[0]
 
 
+def unwrap_spreadsheet_bytes(file_bytes, filename, preferred_contains=None):
+    """副檔名 .zip 才解壓。xlsx 本身也是 zip，不可用 PK 魔術判斷。"""
+    name = filename or "file.xlsx"
+    if str(name).lower().endswith(".zip"):
+        inner, inner_name = extract_xlsx_from_zip(file_bytes, preferred_contains=preferred_contains)
+        return _file_payload_bytes(inner), inner_name
+    return _file_payload_bytes(file_bytes), name
+
+
 def extract_xlsx_from_zip(file_bytes, preferred_contains=None):
     payload = _file_payload_bytes(file_bytes)
     with zipfile.ZipFile(io.BytesIO(payload)) as zf:
@@ -1102,6 +1124,7 @@ def extract_xlsx_from_zip(file_bytes, preferred_contains=None):
             needle = preferred_contains.lower()
             matched = [n for n in names if needle in os.path.basename(n).lower()]
             names = matched or names
+        names.sort(key=lambda n: (0 if n.lower().endswith(".xlsx") else 1, n.lower()))
         chosen = names[0]
         return io.BytesIO(zf.read(chosen)), os.path.basename(chosen)
 
@@ -2071,20 +2094,23 @@ def _preorder_orders_drive_meta():
                 "id": latest.get("id"),
                 "reason": None,
             }
-        drive["reason"] = "找不到 Orders_DD-MM-YYYY-*.xlsx"
+        drive["reason"] = "找不到 Orders_DD-MM-YYYY-*.zip／xlsx"
     except Exception as e:
         drive["reason"] = _status_error_text(e)
     return drive
 
 
 def load_preorder_orders(local_bytes=None, local_name=None, drive=None):
-    """讀最新 Drive Orders，或本機上傳預覽。本機檔不會寫入 Drive。"""
+    """讀最新 Drive Orders（zip 會解成 xlsx），或本機上傳預覽。本機檔不會寫入 Drive。"""
     if drive is None:
         drive = _preorder_orders_drive_meta()
 
     if local_bytes:
         try:
-            orders = read_preorder_orders_table(local_bytes, local_name or "orders.xlsx")
+            payload, inner_name = unwrap_spreadsheet_bytes(
+                local_bytes, local_name or "orders.xlsx", preferred_contains="Orders_"
+            )
+            orders = read_preorder_orders_table(payload, inner_name)
         except Exception as e:
             return {
                 "ok": False,
@@ -2099,6 +2125,7 @@ def load_preorder_orders(local_bytes=None, local_name=None, drive=None):
             "preview": True,
             "source": "local",
             "name": local_name or "本機上傳",
+            "inner_name": inner_name,
             "modified": None,
             "orders": orders,
             "drive": drive,
@@ -2107,14 +2134,17 @@ def load_preorder_orders(local_bytes=None, local_name=None, drive=None):
     if not drive.get("ok"):
         return {
             "ok": False,
-            "reason": drive.get("reason") or "找不到 Orders_DD-MM-YYYY-*.xlsx",
+            "reason": drive.get("reason") or "找不到 Orders_DD-MM-YYYY-*.zip／xlsx",
             "preview": False,
             "source": "drive",
             "drive": drive,
         }
     try:
         payload = get_cached_gdrive_file_bytes(drive["id"])
-        orders = read_preorder_orders_table(payload, drive.get("name") or "orders.xlsx")
+        payload, inner_name = unwrap_spreadsheet_bytes(
+            payload, drive.get("name") or "orders.xlsx", preferred_contains="Orders_"
+        )
+        orders = read_preorder_orders_table(payload, inner_name)
     except Exception as e:
         return {
             "ok": False,
@@ -2130,6 +2160,7 @@ def load_preorder_orders(local_bytes=None, local_name=None, drive=None):
         "preview": False,
         "source": "drive",
         "name": drive.get("name"),
+        "inner_name": inner_name,
         "modified": drive.get("modified"),
         "id": drive.get("id"),
         "orders": orders,
@@ -2872,13 +2903,44 @@ def upsert_vendor_rows_into_campaign(campaign_df, selected_rows, filename):
     }
 
 
-def lock_preorder_campaign(campaign_df, orders_df, close_date=None, lock_time=None):
-    """鎖定有 SKU 且尚未實際關閉的列。訂量 = 自購 + min(客戶量, 上限)。上限空＝不封頂。"""
+def preorder_lock_selection_df(campaign_df, orders_df):
+    """可結單列（有 SKU、尚未實際關閉），含預估鎖定數量。"""
+    campaign = ensure_preorder_campaign_df(campaign_df)
+    board = build_preorder_board(campaign, orders_df)
+    qty_by_sku = {c["sku"]: c["accepted_qty"] for c in board["campaigns"] if c["sku"]}
+    rows = []
+    for idx, camp in campaign.iterrows():
+        if is_preorder_row_closed(camp):
+            continue
+        sku = _preorder_text(camp.get("SKU")) if "SKU" in campaign.columns else ""
+        if not sku:
+            continue
+        customer_qty = qty_by_sku.get(sku, 0)
+        limit = _preorder_limit_value(camp.get("上限") if "上限" in campaign.columns else None)
+        self_buy = _preorder_self_buy(camp.get("自購") if "自購" in campaign.columns else 0)
+        rows.append({
+            "勾選": True,
+            "index": int(idx),
+            "品名": _preorder_text(camp.get("品名")) if "品名" in campaign.columns else "",
+            "SKU": sku,
+            "條碼": clean_barcode(camp.get("條碼")) if "條碼" in campaign.columns else "",
+            "貨號": _preorder_text(camp.get("貨號")) if "貨號" in campaign.columns else "",
+            "自購": self_buy,
+            "客戶量": customer_qty,
+            "上限": "" if limit is None else limit,
+            "鎖定數量": preorder_locked_qty(self_buy, customer_qty, limit),
+        })
+    return pd.DataFrame(rows)
+
+
+def lock_preorder_campaign(campaign_df, orders_df, close_date=None, lock_time=None, selected_indices=None):
+    """鎖定有 SKU、尚未實際關閉、且有勾選的列。訂量 = 自購 + min(客戶量, 上限)。上限空＝不封頂。selected_indices 為 None 時鎖定全部可結單列。"""
     campaign = ensure_preorder_campaign_df(campaign_df)
     board = build_preorder_board(campaign, orders_df)
     qty_by_sku = {c["sku"]: c["accepted_qty"] for c in board["campaigns"] if c["sku"]}
     lock_time = lock_time or taipei_now().strftime("%Y-%m-%d %H:%M")
     close_date = _preorder_text(close_date)
+    selected = None if selected_indices is None else {int(i) for i in selected_indices}
     skipped = []
     locked_rows = []
     out = campaign.copy()
@@ -2900,6 +2962,15 @@ def lock_preorder_campaign(campaign_df, orders_df, close_date=None, lock_time=No
                 "條碼": clean_barcode(out.at[idx, "條碼"]) if "條碼" in out.columns else "",
                 "貨號": _preorder_text(out.at[idx, "貨號"]) if "貨號" in out.columns else "",
                 "原因": "未填 SKU，不計客戶量、不鎖定",
+            })
+            continue
+        if selected is not None and int(idx) not in selected:
+            skipped.append({
+                "index": int(idx),
+                "品名": _preorder_text(out.at[idx, "品名"]) if "品名" in out.columns else "",
+                "條碼": clean_barcode(out.at[idx, "條碼"]) if "條碼" in out.columns else "",
+                "貨號": _preorder_text(out.at[idx, "貨號"]) if "貨號" in out.columns else "",
+                "原因": "未勾選結單",
             })
             continue
         customer_qty = qty_by_sku.get(sku, 0)

@@ -1,0 +1,27 @@
+---
+description: st.data_editor 凍結底稿，避免連改兩格跳回上一筆
+globs: views/**/*.py
+alwaysApply: false
+---
+
+# data_editor 防還原
+
+`data=` 每次換成新表（含把輸出灌回同一份 session df），會把還沒送出的格子重設成上一筆。
+
+```python
+# ❌ BAD
+edited = st.data_editor(st.session_state["df"], key="grid")
+st.session_state["df"] = edited
+
+# ✅ GOOD
+if "grid_base" not in st.session_state:
+    st.session_state["grid_base"] = st.session_state["df"].copy()
+edited = st.data_editor(st.session_state["grid_base"], key="grid")
+st.session_state["df"] = edited  # 只給存檔／後續邏輯
+```
+
+- `data=` 用穩定 `*_editor_base`；輸出只寫業務用 session。
+- 載入／匯入／解析／列集合變了才 `pop` widget key 與 base。
+- 整頁很重時用 `st.fragment`；fragment 內 `st.rerun(scope="fragment")`。
+- 範例：`_render_preorder_campaign_editor`（`preorder_editor_base` + `preorder_campaign_editor_v5`）。
+- 只勾選、按按鈕才讀結果的表，仍不要每跑一次換新 `data=` 物件。

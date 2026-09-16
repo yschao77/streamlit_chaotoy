@@ -34,6 +34,7 @@ def render(sub_page, cfg):
 - UI 用繁中 + 既有 emoji 標籤（📝📅📋 等），不要改成英文
 - 表單用 `st.columns`；主操作按鈕 `use_container_width=True`
 - 跨 rerun 的資料放 `st.session_state`（既有：`inward_input_df`、`pq_result`），key 保持穩定
+- 可編輯表（`st.data_editor`）凍結底稿，見 `data-editor.mdc`
 
 ## 快取
 

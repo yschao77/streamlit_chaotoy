@@ -41,7 +41,7 @@
 - `batch_edit_basic_info_all_DD-MM-YYYY-*.xlsx`（或 zip）
 - `mass_update_sales_info_3062950_YYYYMMDD*.xlsx`
 - `預購追蹤.xlsx`
-- `Orders_DD-MM-YYYY-*.xlsx`
+- `Orders_DD-MM-YYYY-*.zip`（解成 xlsx）
 
 ## 常見問題
 
