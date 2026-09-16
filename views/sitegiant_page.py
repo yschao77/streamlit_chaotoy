@@ -46,6 +46,7 @@ from utils import (
     _preorder_text,
     parse_vendor_po_bytes,
     upsert_vendor_rows_into_campaign,
+    restore_preorder_closed_locked_fields,
     duplicate_preorder_skus,
     preorder_rows_sku_equals_item_no,
     lock_preorder_campaign,
@@ -149,8 +150,14 @@ def _show_preorder_lock_tables(result):
     skipped = result.get("skipped") or []
     locked_rows = result.get("locked_rows") or []
     if skipped:
-        st.warning(f"{len(skipped)} 列因未填 SKU 未鎖定。")
-        st.dataframe(pd.DataFrame(skipped), hide_index=True, use_container_width=True)
+        closed = [s for s in skipped if "實際關閉" in str(s.get("原因") or "")]
+        no_sku = [s for s in skipped if s not in closed]
+        if no_sku:
+            st.warning(f"{len(no_sku)} 列因未填 SKU 未鎖定。")
+            st.dataframe(pd.DataFrame(no_sku), hide_index=True, use_container_width=True)
+        if closed:
+            st.info(f"{len(closed)} 列已實際關閉，不重算訂量。清空實際關閉後才可再鎖定。")
+            st.dataframe(pd.DataFrame(closed), hide_index=True, use_container_width=True)
     if locked_rows:
         show = pd.DataFrame(locked_rows)
         cols = [c for c in PREORDER_LOCK_DISPLAY_COLUMNS if c in show.columns]
@@ -416,6 +423,7 @@ def _render_preorder_vendor_import(campaign_df):
     st.caption(
         "勾選要跟的款再寫入。只帶入廠商檔名、貨號、品名、條碼；不會填庫存 SKU。"
         " 沒條碼只要勾選也會匯入。已有列的 SKU、自購、上限會保留。"
+        " 已填實際關閉的列不會被這次匯入覆寫。"
     )
     uploaded = st.file_uploader(
         "上傳廠商原始訂購單（xlsx）",
@@ -473,6 +481,9 @@ def _render_preorder_vendor_import(campaign_df):
         st.session_state["preorder_vendor_import_msg"] = (
             f"已寫入活動表：新增 {result['added']} 列、更新 {result['updated']} 列。"
         )
+        skipped_closed = result.get("skipped_closed") or 0
+        if skipped_closed:
+            st.session_state["preorder_vendor_import_msg"] += f" {skipped_closed} 列已實際關閉，未覆寫。"
         for note in result.get("reports") or []:
             st.session_state["preorder_vendor_import_msg"] += " " + note
         st.rerun()
@@ -484,7 +495,8 @@ def _render_preorder_close(campaign_df, orders_df):
     st.markdown("### 4. 結單下載")
     st.caption(
         "鎖定數量 = 自購 + min(客戶量, 上限)。上限空＝不封頂；自購空＝0。"
-        " 未填 SKU 的列不算客戶量、不鎖定。SiteGiant 採購單只給本機下載，不會覆寫雲端空殼。"
+        " 未填 SKU 的列不算客戶量、不鎖定。已實際關閉的列不重算訂量。"
+        " SiteGiant 採購單只給本機下載，不會覆寫雲端空殼。"
         " 同場再確認鎖定，會取代本次尚未存檔的廠商單歷史。"
     )
     dups = duplicate_preorder_skus(campaign_df)
@@ -1528,9 +1540,16 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
         st.session_state["preorder_campaign_df"] = edited
 
         st.markdown("### 2. 補賣場資料並存檔")
-        st.caption("SKU 填自定義編碼（與 SiteGiant 庫存 SKU 同一顆）。貨號來自廠商單，不要填進 SKU。")
+        st.caption(
+            "SKU 填自定義編碼（與 SiteGiant 庫存 SKU 同一顆）。貨號來自廠商單，不要填進 SKU。"
+            " 已填實際關閉的列：自購、上限、SKU、月份、結單日不能改（改了會還原）。"
+            " 品名、私密連結、條碼、貨號仍可改。清空實際關閉＝重開。"
+        )
+        previous = st.session_state.get("preorder_campaign_df", loaded["campaign"])
+        if previous is not None:
+            previous = previous.copy()
         edited = st.data_editor(
-            st.session_state.get("preorder_campaign_df", loaded["campaign"]),
+            previous,
             num_rows="dynamic",
             use_container_width=True,
             hide_index=True,
@@ -1538,20 +1557,31 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
             column_config={
                 "月份": st.column_config.TextColumn("月份", help="YYYY-MM"),
                 "結單日": st.column_config.TextColumn("結單日", help="YYYY-MM-DD"),
-                "SKU": st.column_config.TextColumn("SKU", help="自定義編碼／庫存 SKU；四款請填四個不同 SKU。匯入廠商單不會填這欄。"),
+                "SKU": st.column_config.TextColumn("SKU", help="自定義編碼／庫存 SKU；四款請填四個不同 SKU。匯入廠商單不會填這欄。已關閉列不能改。"),
                 "條碼": st.column_config.TextColumn("條碼", help="GTIN／c"),
                 "貨號": st.column_config.TextColumn("貨號", help="廠商貨號（來自訂購單，不是庫存 SKU）"),
                 "品名": st.column_config.TextColumn("品名"),
                 "廠商檔名": st.column_config.TextColumn("廠商檔名", help="來源訂購單檔名"),
-                "自購": st.column_config.NumberColumn("自購", min_value=0, step=1),
-                "上限": st.column_config.NumberColumn("上限", help="客戶預購上限", min_value=0, step=1),
+                "自購": st.column_config.NumberColumn("自購", min_value=0, step=1, help="已實際關閉的列不能改"),
+                "上限": st.column_config.NumberColumn("上限", help="客戶預購上限。已實際關閉的列不能改。", min_value=0, step=1),
                 "私密連結": st.column_config.TextColumn("私密連結"),
                 "預計關閉": st.column_config.TextColumn("預計關閉", help="預計結單日"),
-                "實際關閉": st.column_config.TextColumn("實際關閉", help="實際關掉接受缺貨的時間"),
+                "實際關閉": st.column_config.TextColumn("實際關閉", help="有值＝已關閉。清空即可重開。"),
             },
             key="preorder_campaign_editor_v4",
         )
+        edited, restored_n = restore_preorder_closed_locked_fields(previous, edited)
+        if restored_n:
+            st.session_state["preorder_campaign_df"] = edited
+            st.session_state["preorder_closed_restore_msg"] = (
+                f"已實際關閉的 {restored_n} 列：自購／上限／SKU／月份／結單日已還原。清空實際關閉即可重開。"
+            )
+            _clear_preorder_campaign_editor()
+            st.rerun()
         st.session_state["preorder_campaign_df"] = edited
+        restore_msg = st.session_state.pop("preorder_closed_restore_msg", None)
+        if restore_msg:
+            st.info(restore_msg)
         dups = duplicate_preorder_skus(edited)
         if dups:
             st.warning("同一 SKU 出現在多列，看板客戶量會重複加總：" + "、".join(f"`{s}`" for s in dups))

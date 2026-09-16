@@ -141,22 +141,39 @@ PREORDER_VENDOR_BARCODE_HEADERS = (
     "條碼",
     "國際條碼",
     "條碼編號",
+    "條碼型號",
     "gtin",
     "ean",
     "upc",
     "jan",
+    "jan code",
 )
 PREORDER_VENDOR_ITEM_HEADERS = (
     "貨號",
     "商品編號",
+    "料品編號",
+    "產品編號",
     "品號",
     "品番",
+    "item no",
+    "item",
 )
 PREORDER_VENDOR_NAME_HEADERS = (
+    "名稱",
     "中文",
+    "中文品名",
     "品名",
+    "品名規格",
     "商品名稱",
     "商品名",
+    "description",
+)
+PREORDER_CLOSED_LOCKED_COLUMNS = (
+    "自購",
+    "上限",
+    "SKU",
+    "月份",
+    "結單日",
 )
 PREORDER_VENDOR_QTY_HEADERS_PREFERRED = (
     "訂量",
@@ -2544,10 +2561,19 @@ def _norm_vendor_header(val):
     return " ".join(text.split())
 
 
+def _compact_vendor_header(val):
+    return _norm_vendor_header(val).replace(" ", "")
+
+
 def _header_in(names, aliases):
-    alias_set = {_norm_vendor_header(a) for a in aliases}
+    alias_norm = {_norm_vendor_header(a) for a in aliases}
+    alias_compact = {_compact_vendor_header(a) for a in aliases if _compact_vendor_header(a)}
     for idx, name in enumerate(names):
-        if _norm_vendor_header(name) in alias_set:
+        if _norm_vendor_header(name) in alias_norm:
+            return idx
+    for idx, name in enumerate(names):
+        compact = _compact_vendor_header(name)
+        if compact and compact in alias_compact:
             return idx
     return None
 
@@ -2668,13 +2694,137 @@ def _campaign_match_index(campaign, barcode, item_no, pname, filename):
     return None
 
 
+def is_preorder_row_closed(row):
+    if row is None:
+        return False
+    if isinstance(row, dict) or hasattr(row, "get"):
+        return bool(_preorder_text(row.get("實際關閉")))
+    return False
+
+
+def _locked_field_equal(col, old, new):
+    if col in ("自購", "上限"):
+        old_n = pd.to_numeric(old, errors="coerce")
+        new_n = pd.to_numeric(new, errors="coerce")
+        if pd.isna(old_n) and pd.isna(new_n):
+            return True
+        return old_n == new_n
+    return _preorder_text(old) == _preorder_text(new)
+
+
+def _campaign_row_label(row):
+    name = _preorder_text(row.get("品名"))
+    item_no = _preorder_text(row.get("貨號"))
+    barcode = clean_barcode(row.get("條碼"))
+    sku = _preorder_text(row.get("SKU"))
+    return name or item_no or barcode or sku or "（無品名）"
+
+
+def _match_prev_closed_index(prev_df, used, edited_row):
+    barcode = clean_barcode(edited_row.get("條碼"))
+    item_no = _preorder_text(edited_row.get("貨號"))
+    pname = _preorder_text(edited_row.get("品名"))
+    filename = _preorder_text(edited_row.get("廠商檔名"))
+    sku = _preorder_text(edited_row.get("SKU"))
+    candidates = []
+    for idx, row in prev_df.iterrows():
+        if idx in used or not is_preorder_row_closed(row):
+            continue
+        candidates.append(idx)
+        if barcode and clean_barcode(row.get("條碼")) == barcode:
+            return idx
+    if item_no:
+        for idx in candidates:
+            row = prev_df.loc[idx]
+            if _preorder_text(row.get("廠商檔名")) == filename and _preorder_text(row.get("貨號")) == item_no:
+                return idx
+    if pname:
+        for idx in candidates:
+            row = prev_df.loc[idx]
+            if _preorder_text(row.get("廠商檔名")) == filename and _preorder_text(row.get("品名")) == pname:
+                return idx
+    if sku:
+        for idx in candidates:
+            row = prev_df.loc[idx]
+            if _preorder_text(row.get("SKU")) == sku:
+                return idx
+    return None
+
+
+def _closed_row_identity_match(prev_row, edited_row):
+    prev_bc = clean_barcode(prev_row.get("條碼"))
+    edit_bc = clean_barcode(edited_row.get("條碼"))
+    if prev_bc and edit_bc:
+        return prev_bc == edit_bc
+    prev_item = _preorder_text(prev_row.get("貨號"))
+    edit_item = _preorder_text(edited_row.get("貨號"))
+    if prev_item and edit_item and prev_item == edit_item:
+        return True
+    prev_sku = _preorder_text(prev_row.get("SKU"))
+    edit_sku = _preorder_text(edited_row.get("SKU"))
+    if prev_sku and edit_sku and prev_sku == edit_sku:
+        return True
+    prev_name = _preorder_text(prev_row.get("品名"))
+    edit_name = _preorder_text(edited_row.get("品名"))
+    return bool(prev_name and edit_name and prev_name == edit_name)
+
+
+def restore_preorder_closed_locked_fields(previous_df, edited_df):
+    """已實際關閉的列還原自購／上限／SKU／月份／結單日。清空實際關閉＝重開，不還原。"""
+    prev = ensure_preorder_campaign_df(previous_df)
+    edited = ensure_preorder_campaign_df(edited_df)
+    if edited.empty or prev.empty:
+        return edited, 0
+    out = edited.copy()
+    restored_n = 0
+    used = set()
+    restored_edit = set()
+
+    def _apply(edit_idx, prev_idx):
+        nonlocal restored_n
+        changed = False
+        for col in PREORDER_CLOSED_LOCKED_COLUMNS:
+            if col not in out.columns or col not in prev.columns:
+                continue
+            old = prev.at[prev_idx, col]
+            if _locked_field_equal(col, old, out.at[edit_idx, col]):
+                continue
+            out.at[edit_idx, col] = old
+            changed = True
+        used.add(prev_idx)
+        restored_edit.add(edit_idx)
+        if changed:
+            restored_n += 1
+
+    prev_indices = list(prev.index)
+    edit_indices = list(out.index)
+    for i in range(min(len(prev_indices), len(edit_indices))):
+        pi = prev_indices[i]
+        ei = edit_indices[i]
+        if not is_preorder_row_closed(out.loc[ei]) or not is_preorder_row_closed(prev.loc[pi]):
+            continue
+        if not _closed_row_identity_match(prev.loc[pi], out.loc[ei]):
+            continue
+        _apply(ei, pi)
+
+    for ei in edit_indices:
+        if ei in restored_edit or not is_preorder_row_closed(out.loc[ei]):
+            continue
+        pi = _match_prev_closed_index(prev, used, out.loc[ei])
+        if pi is None:
+            continue
+        _apply(ei, pi)
+    return ensure_preorder_campaign_df(out), restored_n
+
+
 def upsert_vendor_rows_into_campaign(campaign_df, selected_rows, filename):
-    """勾選列寫入活動表。空條碼可匯入。不覆蓋 SKU／自購／上限等營運欄。"""
+    """勾選列寫入活動表。空條碼可匯入。不覆蓋 SKU／自購／上限等營運欄。已關閉列不覆寫。"""
     campaign = ensure_preorder_campaign_df(campaign_df)
     filename = _preorder_text(filename)
     reports = []
     added = 0
     updated = 0
+    skipped_closed = 0
     for item in selected_rows or []:
         barcode = clean_barcode(item.get("條碼"))
         item_no = _preorder_text(item.get("貨號"))
@@ -2694,6 +2844,14 @@ def upsert_vendor_rows_into_campaign(campaign_df, selected_rows, filename):
             campaign.at[len(campaign) - 1, "SKU"] = ""
             added += 1
             continue
+        if is_preorder_row_closed(campaign.loc[idx]):
+            skipped_closed += 1
+            reports.append(
+                "已實際關閉，不覆寫貨號／品名／條碼："
+                + _campaign_row_label(campaign.loc[idx])
+                + "。清空實際關閉後才可再匯入。"
+            )
+            continue
         kept_sku = _preorder_text(campaign.at[idx, "SKU"])
         campaign.at[idx, "廠商檔名"] = filename or campaign.at[idx, "廠商檔名"]
         if item_no:
@@ -2709,12 +2867,13 @@ def upsert_vendor_rows_into_campaign(campaign_df, selected_rows, filename):
         "campaign": ensure_preorder_campaign_df(campaign),
         "added": added,
         "updated": updated,
+        "skipped_closed": skipped_closed,
         "reports": reports,
     }
 
 
 def lock_preorder_campaign(campaign_df, orders_df, close_date=None, lock_time=None):
-    """鎖定有 SKU 的列。訂量 = 自購 + min(客戶量, 上限)。上限空＝不封頂。"""
+    """鎖定有 SKU 且尚未實際關閉的列。訂量 = 自購 + min(客戶量, 上限)。上限空＝不封頂。"""
     campaign = ensure_preorder_campaign_df(campaign_df)
     board = build_preorder_board(campaign, orders_df)
     qty_by_sku = {c["sku"]: c["accepted_qty"] for c in board["campaigns"] if c["sku"]}
@@ -2724,6 +2883,15 @@ def lock_preorder_campaign(campaign_df, orders_df, close_date=None, lock_time=No
     locked_rows = []
     out = campaign.copy()
     for idx, camp in out.iterrows():
+        if is_preorder_row_closed(camp):
+            skipped.append({
+                "index": int(idx),
+                "品名": _preorder_text(out.at[idx, "品名"]) if "品名" in out.columns else "",
+                "條碼": clean_barcode(out.at[idx, "條碼"]) if "條碼" in out.columns else "",
+                "貨號": _preorder_text(out.at[idx, "貨號"]) if "貨號" in out.columns else "",
+                "原因": "已實際關閉，不重算訂量",
+            })
+            continue
         sku = _preorder_text(out.at[idx, "SKU"]) if "SKU" in out.columns else ""
         if not sku:
             skipped.append({
