@@ -15,6 +15,7 @@ from utils import (
     ID_PROD_FOLDER, ID_PRICE_SUMMARY_FOLDER, ID_SHOPEE_FOLDER,
     ID_HISTORY_INWARD_FOLDER, ID_BASE_FOLDER, ID_SITEGIANT_BATCH_FOLDER,
     ID_SITEGIANT_UPC_FOLDER, ID_SHOPEE_MASS_UPDATE_FOLDER, ID_PRICE_SUMMARY_FALLBACK,
+    clear_cloud_data_caches,
 )
 
 from views import sitegiant_page, integration_page, status_page
@@ -242,6 +243,18 @@ def process_smart_headers(df_raw, header_row_idx):
 # 🧭 5. 側邊欄：導覽控制台
 # ==========================================
 st.sidebar.markdown("## 🏢 進銷存中央管理系統")
+if st.sidebar.button(
+    "🔄 清除快取並重新載入",
+    key="clear_cloud_cache",
+    type="secondary",
+    use_container_width=True,
+):
+    clear_cloud_data_caches()
+    st.session_state["cache_cleared"] = True
+    st.rerun()
+if st.session_state.pop("cache_cleared", False):
+    st.toast("已清除快取，正在重新載入雲端資料")
+st.sidebar.caption("雲端檔剛改過再按。未存檔的預購編輯會被雲端最新檔蓋掉。")
 st.sidebar.write("---")
 
 main_module = st.sidebar.selectbox(

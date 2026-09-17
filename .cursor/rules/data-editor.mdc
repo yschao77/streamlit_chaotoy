@@ -23,5 +23,5 @@ st.session_state["df"] = edited  # 只給存檔／後續邏輯
 - `data=` 用穩定 `*_editor_base`；輸出只寫業務用 session。
 - 載入／匯入／解析／列集合變了才 `pop` widget key 與 base。
 - 整頁很重時用 `st.fragment`；fragment 內 `st.rerun(scope="fragment")`。
-- 範例：`_render_preorder_campaign_editor`（`preorder_editor_base` + `preorder_campaign_editor_v5`）。
+- 範例：`_render_preorder_campaign_editor`（進行中：`preorder_editor_open_base` + `preorder_campaign_editor_open_v1`；已關閉：`preorder_editor_closed_base` + `preorder_campaign_editor_closed_v1`）。
 - 只勾選、按按鈕才讀結果的表，仍不要每跑一次換新 `data=` 物件。

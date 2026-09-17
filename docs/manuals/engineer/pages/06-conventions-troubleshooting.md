@@ -22,7 +22,9 @@ df["條碼"] = df["條碼"].map(clean_barcode)
 
 ## 快取
 
-寫雲端成功後常見要清：
+側邊欄「清除快取並重新載入」走 `clear_cloud_data_caches()`：`st.cache_data.clear()`，並 pop `gdrive_id_cache`、`inward_index_result`、`preorder_loaded`、`preorder_orders_loaded`、`preorder_orders_synced`。不清 Drive `cache_resource`。主檔 ID 在 `app.py` 開頭就查，必須清完立刻 `st.rerun()`。
+
+寫雲端成功後局部仍可清：
 
 - `load_master_data.clear()`
 - `load_shopee_data.clear()`
@@ -30,7 +32,7 @@ df["條碼"] = df["條碼"].map(clean_barcode)
 - `get_cached_gdrive_file_bytes.clear()`
 - `_load_history_inward_index_cached.clear()`（歷史入庫覆寫後、查詢頁「重新載入索引」會一併清入庫檔 bytes）
 
-否則畫面仍是舊檔。
+否則畫面仍是舊檔。畫面資料過期時，先按側邊欄那顆全域按鈕。
 
 ## 故障排除
 
@@ -48,6 +50,6 @@ df["條碼"] = df["條碼"].map(clean_barcode)
 | UPC 填補 0 筆 | 蝦皮列表空或沒有效 GTIN；SKU 對不上 |
 | 重複匯入被拒 | md5 已在「匯入檔案」或「已處理採購單」 |
 | 條碼對不上 | 未經 `clean_barcode`；Excel 科學記號 |
-| 畫面資料過期 | 寫入後沒清 cache，或 TTL 未到 |
+| 畫面資料過期 | 先按側邊欄「清除快取並重新載入」；寫入後沒清 cache，或 TTL 未到 |
 
 監看用的蝦皮資料夾沒接流程是正常的，不要在同步 script 裡誤讀它們當主表來源。

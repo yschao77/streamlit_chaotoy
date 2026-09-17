@@ -41,3 +41,4 @@ def render(sub_page, cfg):
 - Drive service：`@st.cache_resource`
 - 檔案 bytes / 主表：`@st.cache_data(ttl=600)`（ID 查詢可用 ttl=3600）
 - 寫入雲端成功後，該清的 cache 要清，避免畫面仍是舊檔
+- 側邊欄「清除快取並重新載入」呼叫 `clear_cloud_data_caches()`（`st.cache_data.clear()` + 丟掉擋住重讀的 session 快照），不清 `cache_resource`。主檔 ID 在 script 開頭就查，必須清完立刻 `st.rerun()`

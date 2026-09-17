@@ -265,6 +265,16 @@ PREORDER_UNPAID_STATUS = "未付款"
 PREORDER_REFUNDED_STATUS = "已退款"
 PREORDER_STATUS_PREORDER = "預購"
 PREORDER_STATUS_ARRIVED = "到貨"
+PREORDER_STAGE_COLLECTING = "收單中"
+PREORDER_STAGE_AWAITING_ARRIVAL = "已結單待到貨"
+PREORDER_STAGE_CHASING_PAYMENT = "催款中"
+PREORDER_STAGE_DONE = "完成"
+PREORDER_STAGE_ORDER = (
+    PREORDER_STAGE_COLLECTING,
+    PREORDER_STAGE_AWAITING_ARRIVAL,
+    PREORDER_STAGE_CHASING_PAYMENT,
+    PREORDER_STAGE_DONE,
+)
 PREORDER_BUCKET_PAID = "paid"
 PREORDER_BUCKET_UNPAID = "unpaid"
 PREORDER_TRACKER_RESERVED_SHEETS = (
@@ -1013,6 +1023,24 @@ def invalidate_history_inward_caches():
     """入庫單或索引寫回後呼叫，避免重建掃到舊 bytes。"""
     get_cached_gdrive_file_bytes.clear()
     _load_history_inward_index_cached.clear()
+
+
+_CLOUD_SESSION_CACHE_KEYS = (
+    "gdrive_id_cache",
+    "inward_index_result",
+    "preorder_loaded",
+    "preorder_orders_loaded",
+    "preorder_orders_synced",
+)
+
+
+def clear_cloud_data_caches():
+    """清掉 Drive 檔案／ID／狀態快取，下一輪 rerun 會重讀雲端。"""
+    if not _in_streamlit():
+        return
+    st.cache_data.clear()
+    for key in _CLOUD_SESSION_CACHE_KEYS:
+        st.session_state.pop(key, None)
 
 
 def refresh_history_inward_index(folder_id):
@@ -2683,7 +2711,7 @@ def parse_vendor_po_bytes(file_bytes, filename="vendor.xlsx"):
                 "貨號": item_no,
                 "品名": pname,
                 "條碼": barcode,
-                "勾選": True,
+                "勾選": False,
             })
     if not rows and not headers_found:
         return {
@@ -2731,6 +2759,243 @@ def is_preorder_row_closed(row):
     if isinstance(row, dict) or hasattr(row, "get"):
         return bool(_preorder_text(row.get("實際關閉")))
     return False
+
+
+def preorder_sku_status_map(sku_status_df):
+    """SKU → 狀態（預購／到貨）。SKU 狀態表裡沒有的 SKU 不會出現在這個字典裡。"""
+    status = ensure_preorder_sku_status_df(sku_status_df)
+    out = {}
+    for _, row in status.iterrows():
+        sku = _preorder_text(row.get("SKU"))
+        if sku:
+            out[sku] = _preorder_text(row.get("狀態")) or PREORDER_STATUS_PREORDER
+    return out
+
+
+def unpaid_skus_from_board(board):
+    """從 build_preorder_board 結果取出目前仍有未付款件數的 SKU 集合，供 preorder_row_stage 判斷「完成」用。"""
+    skus = set()
+    for item in (board or {}).get("campaigns") or []:
+        sku = _preorder_text(item.get("sku"))
+        if sku and float(item.get("unpaid_qty") or 0) > 0:
+            skus.add(sku)
+    return skus
+
+
+def sku_accepted_qty_map(board):
+    """從 build_preorder_board 結果取出每個 SKU 目前已接單（不含取消）件數，
+    供生命週期總覽篩掉「已結單待到貨」但其實沒有任何預購訂單的 SKU。"""
+    out = {}
+    for item in (board or {}).get("campaigns") or []:
+        sku = _preorder_text(item.get("sku"))
+        if sku:
+            out[sku] = out.get(sku, 0) + float(item.get("accepted_qty") or 0)
+    return out
+
+
+def preorder_row_stage(row, sku_status_map=None, unpaid_skus=None):
+    """依單一活動列的「實際關閉」＋SKU 狀態表判斷所在階段。
+
+    - 未實際關閉 → 收單中。
+    - 已實際關閉、SKU 狀態不是「到貨」（含 SKU 狀態表尚無此 SKU 的資料）→ 已結單待到貨。
+    - 已實際關閉、SKU 狀態＝到貨：
+      - 有給 unpaid_skus（例如 `unpaid_skus_from_board` 的結果）且該 SKU 不在裡面 → 完成。
+      - 其餘情況（沒給 unpaid_skus，或該 SKU 仍在未付款清單裡）→ 催款中（保守預設：
+        沒有訂單資料可確認是否已收完款前，一律當作還沒完成）。
+    """
+    if not is_preorder_row_closed(row):
+        return PREORDER_STAGE_COLLECTING
+    sku = _preorder_text(row.get("SKU")) if row is not None else ""
+    status = (sku_status_map or {}).get(sku, PREORDER_STATUS_PREORDER)
+    if status != PREORDER_STATUS_ARRIVED:
+        return PREORDER_STAGE_AWAITING_ARRIVAL
+    if unpaid_skus is not None and sku not in unpaid_skus:
+        return PREORDER_STAGE_DONE
+    return PREORDER_STAGE_CHASING_PAYMENT
+
+
+def compute_preorder_campaign_stages(campaign_df, sku_status_df, unpaid_skus=None):
+    """幫活動表每一列補上「階段」欄（收單中／已結單待到貨／催款中／完成），純顯示用。
+
+    每列各自獨立判斷；同一活動（同月份/廠商檔名）底下可能有多個 SKU、各自不同階段，
+    這裡不做活動層級彙總（彙總留給後續生命週期看板那一階段處理）。
+
+    注意：回傳的 DataFrame 多了「階段」這個非官方欄位，不要拿去存檔
+    （`ensure_preorder_campaign_df`／`save_preorder_tracker` 認的官方欄位集合不含它）。
+    """
+    campaign = ensure_preorder_campaign_df(campaign_df)
+    status_map = preorder_sku_status_map(sku_status_df)
+    out = campaign.copy()
+    out["階段"] = [
+        preorder_row_stage(row, status_map, unpaid_skus)
+        for _, row in campaign.iterrows()
+    ]
+    return out
+
+
+PREORDER_SKU_OVERVIEW_COLUMNS = (
+    "SKU",
+    "品名",
+    "階段",
+    "已接單",
+    "上限",
+    "已付款件數",
+    "未付款件數",
+    "達上限",
+    "狀態",
+    "在活動表",
+)
+
+
+def build_preorder_sku_overview(board, sku_status_df, stage_by_sku=None):
+    """把「SKU 狀態表」跟「活動看板彙總」合併成一張表：SKU／品名／階段／已接單／上限／
+    已付款件數／未付款件數／達上限／狀態／在活動表。純顯示（＋狀態編輯）用，取代原本
+    分開的「SKU 狀態」表與 active/done 兩張摘要表。
+
+    以 SKU 狀態表（All Orders 出現過的所有 SKU）跟看板彙總（活動表已填 SKU 的列）做聯集：
+    - 只在看板彙總出現（活動剛建、還沒有任何訂單對到）：數字欄從看板取，狀態預設「預購」。
+    - 只在 SKU 狀態表出現（到貨但不在活動表，或還沒建活動列）：數字欄留空，「在活動表」＝否。
+    - 兩邊都有：品名優先用看板（活動表填的），數字欄一律用看板口徑。
+
+    注意：這裡的「已接單」跟 SKU 狀態表原本的「件數」口徑不完全一樣（排除規則有差），
+    故意只顯示看板這個口徑，不要兩個都秀出來讓人誤以為是同一個數字。
+
+    排序：沒有活動列可對照的 SKU 排最前（需要人工處理），其餘依階段（收單中→已結單待到貨→
+    催款中→完成）排序，同階段依未付款件數多到少。
+    """
+    status = ensure_preorder_sku_status_df(sku_status_df)
+    summary = (board or {}).get("summary")
+    if summary is None or not len(summary):
+        summary = pd.DataFrame(columns=PREORDER_BOARD_COLUMNS)
+
+    summary_by_sku = {}
+    for _, row in summary.iterrows():
+        sku = _preorder_text(row.get("SKU"))
+        if sku and sku not in summary_by_sku:
+            summary_by_sku[sku] = row
+
+    status_by_sku = {}
+    order = []
+    for _, row in status.iterrows():
+        sku = _preorder_text(row.get("SKU"))
+        if sku and sku not in status_by_sku:
+            status_by_sku[sku] = row
+            order.append(sku)
+    for sku in summary_by_sku:
+        if sku not in status_by_sku:
+            order.append(sku)
+
+    stage_by_sku = stage_by_sku or {}
+    rows = []
+    for sku in order:
+        srow = summary_by_sku.get(sku)
+        strow = status_by_sku.get(sku)
+        name = _preorder_text(srow.get("品名")) if srow is not None else ""
+        if not name and strow is not None:
+            name = _preorder_text(strow.get("品名"))
+        status_val = _preorder_text(strow.get("狀態")) if strow is not None else PREORDER_STATUS_PREORDER
+        if status_val != PREORDER_STATUS_ARRIVED:
+            status_val = PREORDER_STATUS_PREORDER
+        rows.append({
+            "SKU": sku,
+            "品名": name,
+            "階段": stage_by_sku.get(sku, ""),
+            "已接單": srow.get("已接單") if srow is not None else None,
+            "上限": srow.get("上限") if srow is not None else None,
+            "已付款件數": srow.get("已付款件數") if srow is not None else None,
+            "未付款件數": srow.get("未付款件數") if srow is not None else None,
+            "達上限": _preorder_text(srow.get("達上限")) if srow is not None else "",
+            "狀態": status_val,
+            "在活動表": "是" if srow is not None else "否",
+        })
+    out = pd.DataFrame(rows, columns=list(PREORDER_SKU_OVERVIEW_COLUMNS))
+    if out.empty:
+        return out
+
+    out["_stage_rank"] = out["階段"].map(
+        lambda s: PREORDER_STAGE_ORDER.index(s) if s in PREORDER_STAGE_ORDER else -1
+    )
+    out["_unpaid_rank"] = pd.to_numeric(out["未付款件數"], errors="coerce").fillna(0)
+    out = (
+        out.sort_values(["_stage_rank", "_unpaid_rank"], ascending=[True, False])
+        .drop(columns=["_stage_rank", "_unpaid_rank"])
+        .reset_index(drop=True)
+    )
+    return out
+
+
+def apply_sku_overview_status_edits(sku_status_df, overview_df):
+    """把合併總覽表（`build_preorder_sku_overview`）編輯後的「狀態」欄寫回真正的
+    SKU 狀態表；件數／來源檔／品名維持原值不變（那些欄在總覽表裡是唯讀的）。"""
+    old = ensure_preorder_sku_status_df(sku_status_df)
+    old_by_sku = {}
+    for _, row in old.iterrows():
+        sku = _preorder_text(row.get("SKU"))
+        if sku and sku not in old_by_sku:
+            old_by_sku[sku] = row
+
+    rows = []
+    seen = set()
+    source = overview_df if overview_df is not None else pd.DataFrame()
+    for _, row in source.iterrows():
+        sku = _preorder_text(row.get("SKU"))
+        if not sku or sku in seen:
+            continue
+        seen.add(sku)
+        prev = old_by_sku.get(sku)
+        status_val = _preorder_text(row.get("狀態"))
+        if status_val != PREORDER_STATUS_ARRIVED:
+            status_val = PREORDER_STATUS_PREORDER
+        rows.append({
+            "SKU": sku,
+            "品名": _preorder_text(prev.get("品名")) if prev is not None else _preorder_text(row.get("品名")),
+            "件數": prev.get("件數") if prev is not None else 0,
+            "狀態": status_val,
+            "來源檔": _preorder_text(prev.get("來源檔")) if prev is not None else "",
+        })
+    for sku, prev in old_by_sku.items():
+        if sku in seen:
+            continue
+        rows.append({
+            "SKU": sku,
+            "品名": _preorder_text(prev.get("品名")),
+            "件數": prev.get("件數"),
+            "狀態": _preorder_text(prev.get("狀態")) or PREORDER_STATUS_PREORDER,
+            "來源檔": _preorder_text(prev.get("來源檔")),
+        })
+    if not rows:
+        return ensure_preorder_sku_status_df(None)
+    return ensure_preorder_sku_status_df(pd.DataFrame(rows))
+
+
+def preorder_sku_detail_lines(board, skus):
+    """把選中 SKU 的已付款／未付款明細合併成一張表，未付款排前面，取代原本
+    「每個 SKU 一個 expander、已付款/未付款兩張並排小表」的畫法。
+
+    `unpaid_lines`／`paid_lines`（來自 `build_preorder_board`）本身已經是
+    `preorder_line_view` 的結果，已經含「付款狀態」欄（已付款／未付款），
+    這裡直接沿用那欄排序，不用再多加一欄。
+    """
+    wanted = set(_preorder_text(s) for s in (skus or []) if _preorder_text(s))
+    if not wanted:
+        return pd.DataFrame()
+    frames = []
+    for item in (board or {}).get("campaigns") or []:
+        sku = _preorder_text(item.get("sku"))
+        if sku not in wanted:
+            continue
+        unpaid = item.get("unpaid_lines")
+        if unpaid is not None and len(unpaid):
+            frames.append(unpaid)
+        paid = item.get("paid_lines")
+        if paid is not None and len(paid):
+            frames.append(paid)
+    if not frames:
+        return pd.DataFrame()
+    out = pd.concat(frames, ignore_index=True)
+    out["_unpaid_first"] = (out["付款狀態"] != PREORDER_UNPAID_STATUS).astype(int)
+    out = out.sort_values("_unpaid_first").drop(columns="_unpaid_first").reset_index(drop=True)
+    return out
 
 
 def _locked_field_equal(col, old, new):

@@ -46,7 +46,6 @@ from utils import (
     _preorder_text,
     parse_vendor_po_bytes,
     upsert_vendor_rows_into_campaign,
-    restore_preorder_closed_locked_fields,
     duplicate_preorder_skus,
     preorder_rows_sku_equals_item_no,
     lock_preorder_campaign,
@@ -56,7 +55,6 @@ from utils import (
     fill_sg_restock_bytes,
     taipei_now,
     PREORDER_VENDOR_HISTORY_COLUMNS,
-    PREORDER_SKU_STATUS_COLUMNS,
     PREORDER_STATUS_PREORDER,
     PREORDER_STATUS_ARRIVED,
     extract_preorder_pending_df,
@@ -67,6 +65,18 @@ from utils import (
     campaign_df_from_arrived_skus,
     arrived_skus_missing_from_campaign,
     ensure_preorder_sku_status_df,
+    compute_preorder_campaign_stages,
+    unpaid_skus_from_board,
+    sku_accepted_qty_map,
+    PREORDER_STAGE_ORDER,
+    PREORDER_STAGE_DONE,
+    PREORDER_STAGE_AWAITING_ARRIVAL,
+    ensure_preorder_campaign_df,
+    PREORDER_CLOSED_LOCKED_COLUMNS,
+    build_preorder_sku_overview,
+    apply_sku_overview_status_edits,
+    preorder_sku_detail_lines,
+    PREORDER_SKU_OVERVIEW_COLUMNS,
 )
 
 
@@ -109,6 +119,12 @@ def _editor_base(base_key, df, *, replace_empty=False):
 
 
 def _clear_preorder_campaign_editor():
+    st.session_state.pop("preorder_campaign_editor_open_v1", None)
+    st.session_state.pop("preorder_campaign_editor_closed_v1", None)
+    st.session_state.pop("preorder_editor_open_base", None)
+    st.session_state.pop("preorder_editor_closed_base", None)
+    st.session_state.pop("preorder_stage_move_msg", None)
+    # 舊版單一表格的 key／base，重複 pop 是安全的（本來就不存在時 pop 不會出錯）。
     st.session_state.pop("preorder_campaign_editor_v5", None)
     st.session_state.pop("preorder_campaign_editor_v4", None)
     st.session_state.pop("preorder_campaign_editor_v3", None)
@@ -122,7 +138,14 @@ def _clear_inward_grid_editor():
     st.session_state.pop("inward_grid_base", None)
 
 
-def _clear_preorder_sku_status_editor():
+def _clear_preorder_sku_overview_state():
+    """重新載入雲端資料後，清掉「3. 對客戶訂單」彙總表/搜尋框/明細選取的殘留 widget 狀態，
+    避免顯示對不上剛重讀的資料。取代舊版 `_clear_preorder_sku_status_editor`。"""
+    st.session_state.pop("preorder_sku_overview_editor", None)
+    st.session_state.pop("preorder_sku_overview_search", None)
+    st.session_state.pop("preorder_sku_detail_pick", None)
+    st.session_state.pop("preorder_pending_search", None)
+    # 舊版獨立 SKU 狀態編輯表的 key，重複 pop 是安全的。
     st.session_state.pop("preorder_sku_status_editor", None)
     st.session_state.pop("preorder_sku_editor_base", None)
     st.session_state.pop("preorder_sku_editor_skus", None)
@@ -184,75 +207,185 @@ def _preorder_fragment(fn):
     return deco(fn) if deco else fn
 
 
+PREORDER_STAGE_ICONS = {
+    "收單中": "🟡",
+    "已結單待到貨": "🟠",
+    "催款中": "🔴",
+    "完成": "🟢",
+}
+
+
+def _render_preorder_lifecycle_overview(
+    campaign_df, sku_status_df, unpaid_skus=None, accepted_qty_by_sku=None
+):
+    """頁面最上方的生命週期總覽：依「實際關閉」＋「SKU狀態」把每個活動列分到 4 個階段。"""
+    staged = compute_preorder_campaign_stages(campaign_df, sku_status_df, unpaid_skus)
+    if staged.empty:
+        st.caption("活動表沒有列，暫無生命週期總覽。")
+        return
+
+    if accepted_qty_by_sku is not None:
+        no_order_skus = {sku for sku, qty in accepted_qty_by_sku.items() if not qty}
+        drop = (staged["階段"] == PREORDER_STAGE_AWAITING_ARRIVAL) & staged["SKU"].map(
+            _preorder_text
+        ).isin(no_order_skus)
+        staged = staged.loc[~drop]
+
+    counts = staged["階段"].value_counts()
+    cols = st.columns(len(PREORDER_STAGE_ORDER))
+    for col, stage in zip(cols, PREORDER_STAGE_ORDER):
+        icon = PREORDER_STAGE_ICONS.get(stage, "")
+        col.metric(f"{icon} {stage}", int(counts.get(stage, 0)))
+
+    captions = []
+    if unpaid_skus is None:
+        captions.append(
+            "「催款中」目前只要已到貨就列在這裡，還沒對到 All Orders 未付款件數，"
+            "所以看不到「完成」；往下拉到「3. 對客戶訂單」載入 All Orders 後這裡會自動補上。"
+        )
+    if accepted_qty_by_sku is None:
+        captions.append(
+            "「已結單待到貨」目前還沒排除沒有預購訂單的 SKU；"
+            "往下拉到「3. 對客戶訂單」載入 All Orders 後這裡會自動篩掉。"
+        )
+    if captions:
+        st.caption(" ".join(captions))
+
+    show_cols = [c for c in ("月份", "SKU", "品名", "結單日", "實際關閉") if c in staged.columns]
+    for stage in PREORDER_STAGE_ORDER:
+        rows = staged.loc[staged["階段"] == stage]
+        icon = PREORDER_STAGE_ICONS.get(stage, "")
+        with st.expander(f"{icon} {stage}（{len(rows)}）", expanded=False):
+            if rows.empty:
+                st.caption("目前沒有列在這個階段。")
+            else:
+                st.dataframe(rows[show_cols], use_container_width=True, hide_index=True)
+
+
+def _preorder_campaign_column_config(disabled_cols=()):
+    d = lambda col: col in disabled_cols  # noqa: E731
+    return {
+        "月份": st.column_config.TextColumn("月份", help="YYYY-MM", disabled=d("月份")),
+        "結單日": st.column_config.TextColumn("結單日", help="YYYY-MM-DD", disabled=d("結單日")),
+        "SKU": st.column_config.TextColumn(
+            "SKU",
+            help="自定義編碼／庫存 SKU；四款請填四個不同 SKU。匯入廠商單不會填這欄。",
+            disabled=d("SKU"),
+        ),
+        "條碼": st.column_config.TextColumn("條碼", help="GTIN／c"),
+        "貨號": st.column_config.TextColumn("貨號", help="廠商貨號（來自訂購單，不是庫存 SKU）"),
+        "品名": st.column_config.TextColumn("品名"),
+        "廠商檔名": st.column_config.TextColumn("廠商檔名", help="來源訂購單檔名"),
+        "自購": st.column_config.NumberColumn(
+            "自購", min_value=0, step=1, help="已實際關閉的列不能改", disabled=d("自購")
+        ),
+        "上限": st.column_config.NumberColumn(
+            "上限", help="客戶預購上限。已實際關閉的列不能改。", min_value=0, step=1, disabled=d("上限")
+        ),
+        "私密連結": st.column_config.TextColumn("私密連結"),
+        "預計關閉": st.column_config.TextColumn("預計關閉", help="預計結單日"),
+        "實際關閉": st.column_config.TextColumn(
+            "實際關閉", help="有值＝已關閉。清空即可重開，重開後這列會移回上方可編輯表。"
+        ),
+    }
+
+
+def _preorder_closed_flags(df):
+    if df is None or getattr(df, "empty", True):
+        return pd.Series(dtype=bool)
+    return df.get("實際關閉", pd.Series([""] * len(df), index=df.index)).map(_preorder_text).astype(bool)
+
+
 @_preorder_fragment
 def _render_preorder_campaign_editor():
     loaded = st.session_state.get("preorder_loaded") or {}
-    campaign = st.session_state.get("preorder_campaign_df", loaded.get("campaign"))
-    base = st.session_state.get("preorder_editor_base")
-    if base is None or (
-        getattr(base, "empty", True)
-        and campaign is not None
-        and not getattr(campaign, "empty", True)
-    ):
-        st.session_state["preorder_editor_base"] = campaign.copy() if campaign is not None else campaign
-        base = st.session_state["preorder_editor_base"]
+    campaign = ensure_preorder_campaign_df(
+        st.session_state.get("preorder_campaign_df", loaded.get("campaign"))
+    )
+    closed_flags = _preorder_closed_flags(campaign)
+    open_rows = campaign.loc[~closed_flags].reset_index(drop=True)
+    closed_rows = campaign.loc[closed_flags].reset_index(drop=True)
+
     st.caption(
         "SKU 填自定義編碼（與 SiteGiant 庫存 SKU 同一顆）。貨號來自廠商單，不要填進 SKU。"
-        " 已填實際關閉的列：自購、上限、SKU、月份、結單日不能改（改了會還原）。"
-        " 品名、私密連結、條碼、貨號仍可改。清空實際關閉＝重開。"
-        " 改一格後不必等整頁；下方看板會在第 3／4 段或存檔時重算。"
+        " 「進行中」列可自由編輯；填了實際關閉會立刻移到下方「已關閉」收合區，"
+        "自購／上限／SKU／月份／結單日在那裡直接鎖住不能改（不必送出才還原）。"
+        " 品名、私密連結、條碼、貨號兩邊都能改；清空實際關閉即可重開並移回這裡。"
     )
-    edited = st.data_editor(
-        base,
+
+    open_base = _editor_base("preorder_editor_open_base", open_rows, replace_empty=True)
+    edited_open = st.data_editor(
+        open_base,
         num_rows="dynamic",
         use_container_width=True,
         hide_index=True,
         column_order=list(PREORDER_CAMPAIGN_UI_COLUMN_ORDER),
-        column_config={
-            "月份": st.column_config.TextColumn("月份", help="YYYY-MM"),
-            "結單日": st.column_config.TextColumn("結單日", help="YYYY-MM-DD"),
-            "SKU": st.column_config.TextColumn("SKU", help="自定義編碼／庫存 SKU；四款請填四個不同 SKU。匯入廠商單不會填這欄。已關閉列不能改。"),
-            "條碼": st.column_config.TextColumn("條碼", help="GTIN／c"),
-            "貨號": st.column_config.TextColumn("貨號", help="廠商貨號（來自訂購單，不是庫存 SKU）"),
-            "品名": st.column_config.TextColumn("品名"),
-            "廠商檔名": st.column_config.TextColumn("廠商檔名", help="來源訂購單檔名"),
-            "自購": st.column_config.NumberColumn("自購", min_value=0, step=1, help="已實際關閉的列不能改"),
-            "上限": st.column_config.NumberColumn("上限", help="客戶預購上限。已實際關閉的列不能改。", min_value=0, step=1),
-            "私密連結": st.column_config.TextColumn("私密連結"),
-            "預計關閉": st.column_config.TextColumn("預計關閉", help="預計結單日"),
-            "實際關閉": st.column_config.TextColumn("實際關閉", help="有值＝已關閉。清空即可重開。"),
-        },
-        key="preorder_campaign_editor_v5",
+        column_config=_preorder_campaign_column_config(),
+        key="preorder_campaign_editor_open_v1",
     )
-    snapshot = campaign.copy() if campaign is not None else campaign
-    edited, restored_n = restore_preorder_closed_locked_fields(snapshot, edited)
-    if restored_n:
-        st.session_state["preorder_campaign_df"] = edited
-        st.session_state["preorder_closed_restore_msg"] = (
-            f"已實際關閉的 {restored_n} 列：自購／上限／SKU／月份／結單日已還原。清空實際關閉即可重開。"
-        )
-        st.session_state.pop("preorder_campaign_editor_v5", None)
-        st.session_state["preorder_editor_base"] = edited.copy()
+    edited_open = ensure_preorder_campaign_df(edited_open)
+
+    with st.expander(
+        f"🔒 已關閉（{len(closed_rows)} 列，自購／上限／SKU／月份／結單日已鎖定）",
+        expanded=False,
+    ):
+        if closed_rows.empty:
+            st.caption("目前沒有已關閉的活動列。")
+            edited_closed = closed_rows
+        else:
+            st.caption(
+                "這些列已結單，鎖定欄位直接鎖住不給打字。品名／私密連結／條碼／貨號仍可改。"
+                "清空實際關閉會移回上方「進行中」表；如需整列刪除，也請先清空再到上方刪。"
+            )
+            closed_base = _editor_base("preorder_editor_closed_base", closed_rows, replace_empty=True)
+            edited_closed = st.data_editor(
+                closed_base,
+                num_rows="fixed",
+                use_container_width=True,
+                hide_index=True,
+                column_order=list(PREORDER_CAMPAIGN_UI_COLUMN_ORDER),
+                column_config=_preorder_campaign_column_config(PREORDER_CLOSED_LOCKED_COLUMNS),
+                key="preorder_campaign_editor_closed_v1",
+            )
+            edited_closed = ensure_preorder_campaign_df(edited_closed)
+
+    open_became_closed = int(_preorder_closed_flags(edited_open).sum())
+    closed_became_open = int((~_preorder_closed_flags(edited_closed)).sum()) if len(edited_closed) else 0
+
+    merged = ensure_preorder_campaign_df(pd.concat([edited_open, edited_closed], ignore_index=True))
+    st.session_state["preorder_campaign_df"] = merged
+
+    if open_became_closed or closed_became_open:
+        st.session_state.pop("preorder_campaign_editor_open_v1", None)
+        st.session_state.pop("preorder_campaign_editor_closed_v1", None)
+        st.session_state.pop("preorder_editor_open_base", None)
+        st.session_state.pop("preorder_editor_closed_base", None)
+        bits = []
+        if open_became_closed:
+            bits.append(f"{open_became_closed} 列剛填了實際關閉，已移到下方「已關閉」收合區。")
+        if closed_became_open:
+            bits.append(f"{closed_became_open} 列清空了實際關閉，已移回上方「進行中」表。")
+        st.session_state["preorder_stage_move_msg"] = "".join(bits)
         try:
             st.rerun(scope="fragment")
         except TypeError:
             st.rerun()
         return
-    st.session_state["preorder_campaign_df"] = edited
-    restore_msg = st.session_state.pop("preorder_closed_restore_msg", None)
-    if restore_msg:
-        st.info(restore_msg)
-    dups = duplicate_preorder_skus(edited)
+
+    move_msg = st.session_state.pop("preorder_stage_move_msg", None)
+    if move_msg:
+        st.info(move_msg)
+    dups = duplicate_preorder_skus(merged)
     if dups:
         st.warning("同一 SKU 出現在多列，看板客戶量會重複加總：" + "、".join(f"`{s}`" for s in dups))
-    sku_as_item = preorder_rows_sku_equals_item_no(edited)
+    sku_as_item = preorder_rows_sku_equals_item_no(merged)
     if sku_as_item:
         st.warning(
             "有列的 SKU 與廠商貨號相同（"
             + "、".join(f"`{s}`" for s in sku_as_item)
             + "）。庫存 SKU 請填 SiteGiant／蝦皮自定義編碼，貨號請留在「貨號」欄。"
         )
-    empty_skus = _empty_preorder_sku_labels(edited)
+    empty_skus = _empty_preorder_sku_labels(merged)
     if empty_skus:
         st.warning("待補 SKU：" + "、".join(empty_skus[:12]) + ("…" if len(empty_skus) > 12 else ""))
 
@@ -260,23 +393,27 @@ def _render_preorder_campaign_editor():
 def _show_preorder_lock_tables(result):
     skipped = result.get("skipped") or []
     locked_rows = result.get("locked_rows") or []
+    if locked_rows:
+        show = pd.DataFrame(locked_rows)
+        cols = [c for c in PREORDER_LOCK_DISPLAY_COLUMNS if c in show.columns]
+        st.markdown(f"**要鎖定 {len(show)} 列**")
+        st.dataframe(show[cols], hide_index=True, use_container_width=True)
+    else:
+        st.info("這次沒有要鎖定的列。")
     if skipped:
         closed = [s for s in skipped if "實際關閉" in str(s.get("原因") or "")]
         unchecked = [s for s in skipped if "未勾選" in str(s.get("原因") or "")]
         no_sku = [s for s in skipped if s not in closed and s not in unchecked]
-        if no_sku:
-            st.warning(f"{len(no_sku)} 列因未填 SKU 未鎖定。")
-            st.dataframe(pd.DataFrame(no_sku), hide_index=True, use_container_width=True)
-        if closed:
-            st.info(f"{len(closed)} 列已實際關閉，不重算訂量。清空實際關閉後才可再鎖定。")
-            st.dataframe(pd.DataFrame(closed), hide_index=True, use_container_width=True)
-        if unchecked:
-            st.info(f"{len(unchecked)} 列未勾選結單，這次不鎖定。")
-            st.dataframe(pd.DataFrame(unchecked), hide_index=True, use_container_width=True)
-    if locked_rows:
-        show = pd.DataFrame(locked_rows)
-        cols = [c for c in PREORDER_LOCK_DISPLAY_COLUMNS if c in show.columns]
-        st.dataframe(show[cols], hide_index=True, use_container_width=True)
+        with st.expander(f"不鎖定／跳過的列（{len(skipped)} 列）"):
+            if no_sku:
+                st.warning(f"{len(no_sku)} 列因未填 SKU 未鎖定。")
+                st.dataframe(pd.DataFrame(no_sku), hide_index=True, use_container_width=True)
+            if closed:
+                st.info(f"{len(closed)} 列已實際關閉，不重算訂量。清空實際關閉後才可再鎖定。")
+                st.dataframe(pd.DataFrame(closed), hide_index=True, use_container_width=True)
+            if unchecked:
+                st.info(f"{len(unchecked)} 列未勾選結單，這次不鎖定。")
+                st.dataframe(pd.DataFrame(unchecked), hide_index=True, use_container_width=True)
 
 
 def _apply_preorder_lock_to_session(result):
@@ -307,6 +444,7 @@ def _render_preorder_orders_board(campaign_df):
         use_container_width=True,
         key="preorder_orders_reload",
     )
+    st.caption("只重抓 All Orders 與訂單看板；不影響上方活動表尚未存檔的編輯，也不會清掉廠商檔快取或結單預覽。")
     if reload_orders:
         get_cached_gdrive_file_bytes.clear()
         st.session_state.pop("preorder_orders_loaded", None)
@@ -364,7 +502,7 @@ def _render_preorder_orders_board(campaign_df):
         st.session_state["preorder_orders_synced"] = False
         sku_status = ensure_preorder_sku_status_df(st.session_state.get("preorder_sku_status_df"))
         pending = st.session_state.get("preorder_pending_df")
-        sku_status = _render_preorder_sku_and_pending(sku_status, pending, campaign_df, editable=True)
+        sku_status = _render_preorder_sku_overview_and_detail(None, sku_status, pending, campaign_df, editable=True)
         st.session_state["preorder_sku_status_df"] = sku_status
         return None
 
@@ -392,16 +530,9 @@ def _render_preorder_orders_board(campaign_df):
         pending,
         loaded_orders.get("name") or "",
     )
-    sku_key = tuple(sorted(_preorder_text(v) for v in sku_status["SKU"].tolist() if _preorder_text(v)))
-    if st.session_state.get("preorder_sku_editor_skus") != sku_key:
-        _clear_preorder_sku_status_editor()
-        st.session_state["preorder_sku_editor_skus"] = sku_key
     st.session_state["preorder_pending_df"] = pending
     st.session_state["preorder_sku_status_df"] = sku_status
     st.session_state["preorder_orders_synced"] = True
-
-    sku_status = _render_preorder_sku_and_pending(sku_status, pending, campaign_df, editable=True)
-    st.session_state["preorder_sku_status_df"] = sku_status
 
     board = build_preorder_board(campaign_df, orders_df)
     filled_skus = board.get("campaign_skus") or []
@@ -413,99 +544,195 @@ def _render_preorder_orders_board(campaign_df):
     elif preorder_n and filled_skus and matched == 0:
         shown = "、".join(f"`{s}`" for s in filled_skus[:8])
         st.warning(f"活動 SKU（{shown}）對不到本檔任何預購列，所以兩欄件數是 0。")
-
     if board["summary"].empty:
-        st.info("活動表沒有列，活動看板為空。請先在上方補 SKU。")
-        return orders_df
+        st.info("活動表沒有列，看板還沒有可對照的活動；下面仍會列出 All Orders 出現過的 SKU。")
 
-    over = board.get("over_limit_skus") or []
-    if over:
-        st.warning("⚠️ 已接單已達或超過上限：" + "、".join(f"`{sku}`" for sku in over))
-
-    st.dataframe(board["summary"], use_container_width=True, hide_index=True)
-    st.caption("已付款／未付款依付款狀態。可打單另要求訂單狀態＝待處理。催款文只含已標到貨的 SKU。")
-
-    for item in board["campaigns"]:
-        sku = item["sku"] or "（未填 SKU）"
-        title = (
-            f"{sku}　已接單 {item['accepted_qty']}／上限 {item['limit_label']}"
-            f"　已付款 {item['paid_qty']}　未付款 {item['unpaid_qty']}"
-        )
-        if item["over_limit"]:
-            title += "　⚠️ 達上限"
-        with st.expander(title):
-            if item["name"] or item["month"]:
-                st.caption(f"月份：{item['month'] or '—'}　品名：{item['name'] or '—'}")
-            c_paid, c_unpaid = st.columns(2)
-            with c_paid:
-                st.markdown("**已付款**")
-                st.caption("件數＝商品數量")
-                st.metric("已付款件數", item["paid_qty"])
-                st.dataframe(item["paid_lines"], use_container_width=True, hide_index=True)
-            with c_unpaid:
-                st.markdown("**未付款**")
-                st.caption("到貨後才催款；首次通知日在這表與第 5 段通知紀錄")
-                st.metric("未付款件數", item["unpaid_qty"])
-                unpaid_view = attach_preorder_notify_days(
-                    item["unpaid_lines"], st.session_state.get("preorder_notify_df")
-                )
-                st.dataframe(unpaid_view, use_container_width=True, hide_index=True)
+    sku_status = _render_preorder_sku_overview_and_detail(board, sku_status, pending, campaign_df, editable=True)
+    st.session_state["preorder_sku_status_df"] = sku_status
     return orders_df
 
 
-@_preorder_fragment
-def _render_preorder_sku_status_editor():
-    sku_status = ensure_preorder_sku_status_df(st.session_state.get("preorder_sku_status_df"))
-    base = _editor_base("preorder_sku_editor_base", sku_status, replace_empty=True)
+def _filter_preorder_overview(df, keyword):
+    keyword = (keyword or "").strip().lower()
+    if not keyword or df is None or df.empty:
+        return df
+    mask = (
+        df["SKU"].map(_preorder_text).str.lower().str.contains(keyword, regex=False)
+        | df["品名"].map(_preorder_text).str.lower().str.contains(keyword, regex=False)
+    )
+    return df.loc[mask].reset_index(drop=True)
+
+
+def _filter_preorder_pending(df, keyword):
+    keyword = (keyword or "").strip().lower()
+    if not keyword or df is None or getattr(df, "empty", True):
+        return df
+    cols = [c for c in ("SKU", "訂單編號", "商品名稱") if c in df.columns]
+    if not cols:
+        return df
+    mask = None
+    for c in cols:
+        col_mask = df[c].map(_preorder_text).str.lower().str.contains(keyword, regex=False)
+        mask = col_mask if mask is None else (mask | col_mask)
+    return df.loc[mask].reset_index(drop=True)
+
+
+def _render_preorder_sku_overview_editor(overview_df):
+    # 只有「狀態」這一欄可編輯，且是單選 selectbox（原子提交，不是連續打字），跟現有
+    # 勾選 checkbox 表（廠商匯入、結單候選）風險屬性一樣，所以不用 `_editor_base` 凍結
+    # 底稿那套（那套是給自購/上限這類自由輸入欄位防「連改兩格跳回上一筆」用的）。這裡
+    # 的 data 本來就要隨搜尋框即時變動，凍結底稿反而會讓搜尋失效。
     edited = st.data_editor(
-        base,
+        overview_df,
         use_container_width=True,
         hide_index=True,
         num_rows="fixed",
-        column_order=list(PREORDER_SKU_STATUS_COLUMNS),
+        column_order=list(PREORDER_SKU_OVERVIEW_COLUMNS),
         column_config={
             "SKU": st.column_config.TextColumn("SKU", disabled=True),
             "品名": st.column_config.TextColumn("品名", disabled=True),
-            "件數": st.column_config.NumberColumn("件數", disabled=True),
+            "階段": st.column_config.TextColumn("階段", disabled=True),
+            "已接單": st.column_config.NumberColumn("已接單", disabled=True),
+            "上限": st.column_config.TextColumn("上限", disabled=True),
+            "已付款件數": st.column_config.NumberColumn("已付款件數", disabled=True),
+            "未付款件數": st.column_config.NumberColumn("未付款件數", disabled=True),
+            "達上限": st.column_config.TextColumn("達上限", disabled=True),
             "狀態": st.column_config.SelectboxColumn(
                 "狀態",
                 options=[PREORDER_STATUS_PREORDER, PREORDER_STATUS_ARRIVED],
                 required=True,
             ),
-            "來源檔": st.column_config.TextColumn("來源檔", disabled=True),
+            "在活動表": st.column_config.TextColumn("在活動表", disabled=True),
         },
-        key="preorder_sku_status_editor",
+        key="preorder_sku_overview_editor",
     )
-    sku_status = ensure_preorder_sku_status_df(edited)
-    st.session_state["preorder_sku_status_df"] = sku_status
-    return sku_status
+    return edited
 
 
-def _render_preorder_sku_and_pending(sku_status, pending, campaign_df, editable=True):
-    st.markdown("**SKU 狀態**")
-    st.caption(
-        "從 All Orders 預購列自動補尚未列過的 SKU，預設預購。標到貨後才進催款文；再同步不會蓋掉到貨。"
-        " 首次通知日不在這張表，在下方預購訂單明細與第 5 段「通知紀錄」。"
-    )
+def _render_preorder_sku_overview_and_detail(board, sku_status, pending, campaign_df, editable=True):
+    """「3. 對客戶訂單」的看板／SKU 狀態／逐筆明細，合併成一張可搜尋、可編輯狀態的彙總表
+    ＋選取才渲染的合併明細，取代原本「SKU 狀態表＋摘要表＋每個 SKU 一個 expander」。"""
     sku_status = ensure_preorder_sku_status_df(sku_status)
     missing = arrived_skus_missing_from_campaign(sku_status, campaign_df)
-    if missing:
-        st.warning("到貨 SKU 不在活動表（不自動寫入）：" + "、".join(f"`{s}`" for s in missing))
-    if editable:
-        sku_status = _render_preorder_sku_status_editor()
-    else:
-        st.dataframe(sku_status, use_container_width=True, hide_index=True)
-    pending_n = 0 if pending is None or getattr(pending, "empty", True) else len(pending)
-    dated_n = 0
-    if pending is not None and not getattr(pending, "empty", True) and "首次通知日" in pending.columns:
-        dated_n = int(pending["首次通知日"].map(_preorder_text).astype(bool).sum())
-    with st.expander(f"預購訂單明細（{pending_n} 列，{dated_n} 列已有首次通知日）", expanded=bool(dated_n)):
-        st.caption("最新 All Orders 快照。已過天數只算未付款、未取消、未退款。首次通知日來自「本次催款已通知」。")
+
+    stage_unpaid = unpaid_skus_from_board(board) if board else None
+    staged_campaign = compute_preorder_campaign_stages(campaign_df, sku_status, stage_unpaid)
+    _accepted_qty_by_sku = sku_accepted_qty_map(board) if board else {}
+    _no_order_skus = {sku for sku, qty in _accepted_qty_by_sku.items() if not qty}
+    stage_by_sku = {}
+    for _, r in staged_campaign.iterrows():
+        r_sku = _preorder_text(r.get("SKU"))
+        if r_sku:
+            r_stage = r.get("階段")
+            if r_stage == PREORDER_STAGE_AWAITING_ARRIVAL and r_sku in _no_order_skus:
+                r_stage = ""  # 沒有客戶預購訂單，不算「已結單待到貨」（但仍留這列可管理狀態）
+            stage_by_sku[r_sku] = r_stage
+
+    # 已達上限但這個 SKU 已經是「完成」（到貨且沒有未付款件數）就不用再提醒了——
+    # 上限是給「還在收單/催款」時判斷要不要繼續接單用的，結案的批次不需要再跳警告。
+    over_active_skus = []
+    if board:
+        for item in board.get("campaigns") or []:
+            if not item.get("over_limit"):
+                continue
+            sku = _preorder_text(item.get("sku"))
+            if stage_by_sku.get(sku) == PREORDER_STAGE_DONE:
+                continue
+            over_active_skus.append(sku or "（未填 SKU）")
+
+    tab_board, tab_raw = st.tabs(["📋 看板與明細", "🧾 原始訂單明細"])
+
+    with tab_board:
+        if missing:
+            st.warning("到貨 SKU 不在活動表（不自動寫入，仍可在下表改狀態）：" + "、".join(f"`{s}`" for s in missing))
+        if over_active_skus:
+            st.warning("⚠️ 已接單已達或超過上限：" + "、".join(f"`{sku}`" for sku in over_active_skus))
+
+        overview = build_preorder_sku_overview(board, sku_status, stage_by_sku)
+        if overview.empty:
+            st.info("目前沒有任何 SKU（活動表沒填 SKU，也還沒有 All Orders 資料）。")
+        else:
+            search = st.text_input(
+                "🔎 搜尋 SKU／品名",
+                key="preorder_sku_overview_search",
+                placeholder="輸入關鍵字篩選下面表格",
+            )
+            filtered = _filter_preorder_overview(overview, search)
+            if editable:
+                edited_overview = _render_preorder_sku_overview_editor(filtered)
+                sku_status = apply_sku_overview_status_edits(sku_status, edited_overview)
+            else:
+                edited_overview = filtered
+                st.dataframe(filtered, use_container_width=True, hide_index=True)
+            st.caption(
+                "已付款／未付款依付款狀態，只顯示看板口徑；可打單另要求訂單狀態＝待處理；"
+                "催款只含已標到貨的 SKU。「在活動表」＝否表示這個 SKU 還沒建活動列，數字欄留空。"
+            )
+
+            if editable:
+                st.session_state["preorder_sku_status_df"] = sku_status
+                st.caption("改「狀態」後還沒寫回雲端，跟上方 2. 補賣場資料是同一份「覆寫雲端預購追蹤」，按下面這顆就會一起存：")
+                _save_preorder_tracker_button(campaign_df, "preorder_save_sku_overview", primary=False)
+
+            sku_options = [s for s in edited_overview["SKU"].tolist() if s]
+            picked = st.multiselect(
+                "選要看明細的 SKU（已付款／未付款合併顯示，未付款排前面）",
+                options=sku_options,
+                key="preorder_sku_detail_pick",
+            )
+            if picked and board:
+                detail = preorder_sku_detail_lines(board, picked)
+                detail = attach_preorder_notify_days(detail, st.session_state.get("preorder_notify_df"))
+                st.dataframe(detail, use_container_width=True, hide_index=True)
+            elif picked:
+                st.info("目前沒有訂單資料可顯示明細（All Orders 還沒載入）。")
+            else:
+                st.caption("在上面選取 SKU 才會顯示逐筆明細，避免 SKU 一多整頁被撐長。")
+
+    with tab_raw:
+        st.caption(
+            "最新 All Orders 快照，含所有預購訂單列（不分活動/SKU 是否對得上）。"
+            "已過天數只算未付款、未取消、未退款。除錯／稽核用，跟上面看板數字口徑可能不完全一樣。"
+        )
+        pending_n = 0 if pending is None or getattr(pending, "empty", True) else len(pending)
+        dated_n = 0
+        if pending is not None and not getattr(pending, "empty", True) and "首次通知日" in pending.columns:
+            dated_n = int(pending["首次通知日"].map(_preorder_text).astype(bool).sum())
+        st.caption(f"共 {pending_n} 列，{dated_n} 列已有首次通知日。")
         if pending is None or getattr(pending, "empty", True):
             st.info("目前沒有預購訂單列。")
         else:
-            st.dataframe(pending, use_container_width=True, hide_index=True)
+            raw_search = st.text_input(
+                "🔎 搜尋 SKU／訂單編號／商品名稱",
+                key="preorder_pending_search",
+                placeholder="輸入關鍵字篩選下面表格",
+            )
+            raw_filtered = _filter_preorder_pending(pending, raw_search)
+            st.dataframe(raw_filtered, use_container_width=True, hide_index=True)
+
     return sku_status
+
+
+def _stamp_and_persist_notify(campaign_df, keys):
+    result = stamp_preorder_first_notify(st.session_state.get("preorder_notify_df"), keys)
+    st.session_state["preorder_notify_df"] = result["notify"]
+    pending = st.session_state.get("preorder_pending_df")
+    st.session_state["preorder_pending_df"] = attach_preorder_notify_days(
+        pending, result["notify"]
+    )
+    save_result = _persist_preorder_tracker(campaign_df)
+    if result.get("added"):
+        msg = f"已為 {result['added']} 列點上首次通知日 {result.get('today')}（已有日期不改）。"
+    else:
+        msg = "沒有新的未付款列可點日期（可能已點過，或沒有到貨未付款單）。"
+    if save_result.get("ok"):
+        msg += " 已寫入雲端工作表「通知紀錄」與「預購訂單」。"
+        get_cached_gdrive_file_bytes.clear()
+        st.session_state.pop("preorder_loaded", None)
+    else:
+        msg += " 畫面已有日期，但雲端尚未寫回：" + (save_result.get("reason") or "未知錯誤")
+    st.session_state["preorder_notify_msg"] = msg
+    st.rerun()
 
 
 def _render_preorder_arrival_copy(campaign_df, orders_df, sku_status_df):
@@ -523,41 +750,73 @@ def _render_preorder_arrival_copy(campaign_df, orders_df, sku_status_df):
     arrived_campaign = campaign_df_from_arrived_skus(sku_status_df)
     board = build_preorder_board(arrived_campaign, orders_df)
     copies = build_preorder_arrival_copy(board)
-    unpaid_text = copies.get("unpaid_reminder") or ""
     paid_text = copies.get("paid_pick") or ""
-    st.text_area(
-        f"催款可複貼文（{copies.get('unpaid_n', 0)} 列）",
-        value=unpaid_text,
-        height=220,
-        key=f"preorder_copy_unpaid_{hash(unpaid_text)}",
-    )
-    st.text_area(
-        f"可打單名單（待處理＋已付款，{copies.get('paid_n', 0)} 列）",
-        value=paid_text,
-        height=160,
-        key=f"preorder_copy_paid_{hash(paid_text)}",
-    )
-    if st.button("📌 本次催款已通知", use_container_width=True, key="preorder_stamp_notify"):
-        keys = preorder_notify_keys_from_lines(copies.get("unpaid_lines"))
-        result = stamp_preorder_first_notify(st.session_state.get("preorder_notify_df"), keys)
-        st.session_state["preorder_notify_df"] = result["notify"]
-        pending = st.session_state.get("preorder_pending_df")
-        st.session_state["preorder_pending_df"] = attach_preorder_notify_days(
-            pending, result["notify"]
+
+    # 只在內容真的變動時才重建文字框元件，避免每次 rerun 都用 hash 換 key（游標/選取會被重置）。
+    if st.session_state.get("preorder_copy_paid_src") != paid_text:
+        st.session_state.pop("preorder_copy_paid", None)
+        st.session_state["preorder_copy_paid_src"] = paid_text
+
+    with st.expander(
+        f"可打單名單（待處理＋已付款，{copies.get('paid_n', 0)} 列）", expanded=False
+    ):
+        st.text_area(
+            "可複貼文字",
+            value=paid_text,
+            height=160,
+            key="preorder_copy_paid",
+            label_visibility="collapsed",
         )
-        save_result = _persist_preorder_tracker(campaign_df)
-        if result.get("added"):
-            msg = f"已為 {result['added']} 列點上首次通知日 {result.get('today')}（已有日期不改）。"
-        else:
-            msg = "沒有新的未付款列可點日期（可能已點過，或沒有到貨未付款單）。"
-        if save_result.get("ok"):
-            msg += " 已寫入雲端工作表「通知紀錄」與「預購訂單」。"
-            get_cached_gdrive_file_bytes.clear()
-            st.session_state.pop("preorder_loaded", None)
-        else:
-            msg += " 畫面已有日期，但雲端尚未寫回：" + (save_result.get("reason") or "未知錯誤")
-        st.session_state["preorder_notify_msg"] = msg
-        st.rerun()
+
+    unpaid_lines_df = copies.get("unpaid_lines")
+    if unpaid_lines_df is not None and not getattr(unpaid_lines_df, "empty", True):
+        with st.expander(f"逐筆選要通知的未付款訂單（{len(unpaid_lines_df)} 列）"):
+            st.caption("預設全選＝等同下方整批『本次催款已通知』。取消勾選可以只標記部分訂單。")
+            display_cols = [
+                c for c in ["訂單編號", "SKU", "商品名稱", "商品數量", "顧客", "金額"]
+                if c in unpaid_lines_df.columns
+            ]
+            select_base = unpaid_lines_df[display_cols].reset_index(drop=True).copy()
+            select_base.insert(0, "勾選", True)
+            nsel_col1, nsel_col2 = st.columns(2)
+            with nsel_col1:
+                if st.button("全選", key="preorder_notify_select_all", use_container_width=True):
+                    st.session_state.pop("preorder_notify_select_editor", None)
+                    st.session_state["preorder_notify_select_override"] = True
+                    st.rerun()
+            with nsel_col2:
+                if st.button("取消全選", key="preorder_notify_select_none", use_container_width=True):
+                    st.session_state.pop("preorder_notify_select_editor", None)
+                    st.session_state["preorder_notify_select_override"] = False
+                    st.rerun()
+            notify_override = st.session_state.pop("preorder_notify_select_override", None)
+            if notify_override is not None:
+                select_base["勾選"] = notify_override
+            edited_select = st.data_editor(
+                select_base,
+                hide_index=True,
+                use_container_width=True,
+                disabled=display_cols,
+                column_config={"勾選": st.column_config.CheckboxColumn("勾選", default=True)},
+                key="preorder_notify_select_editor",
+            )
+            picked_rows = [
+                i for i, rec in enumerate(edited_select.to_dict(orient="records")) if rec.get("勾選")
+            ]
+            if st.button(
+                f"📌 只標記勾選列已通知（{len(picked_rows)} 列）",
+                use_container_width=True,
+                key="preorder_stamp_notify_selected",
+            ):
+                picked_keys = preorder_notify_keys_from_lines(unpaid_lines_df.iloc[picked_rows])
+                if not picked_keys:
+                    st.warning("沒有勾選任何列。")
+                else:
+                    _stamp_and_persist_notify(campaign_df, picked_keys)
+
+    if st.button("📌 本次催款已通知（整批）", use_container_width=True, key="preorder_stamp_notify"):
+        keys = preorder_notify_keys_from_lines(copies.get("unpaid_lines"))
+        _stamp_and_persist_notify(campaign_df, keys)
     notify_msg = st.session_state.pop("preorder_notify_msg", None)
     if notify_msg:
         st.success(notify_msg)
@@ -604,14 +863,32 @@ def _render_preorder_vendor_import(campaign_df):
         return campaign_df
 
     preview = parsed.get("preview")
-    st.caption(f"檔名：`{uploaded.name}`　可勾選 {len(preview)} 列")
+    st.caption(
+        f"檔名：`{uploaded.name}`　可勾選 {len(preview)} 列。"
+        " 預設不全選，避免整份廠商目錄誤匯入（麗嬰型可能上百列）；請只勾要跟的款，或用下面全選/取消全選輔助。"
+    )
+    sel_col1, sel_col2 = st.columns(2)
+    with sel_col1:
+        if st.button("全選", key="preorder_vendor_select_all", use_container_width=True):
+            st.session_state.pop("preorder_vendor_preview_editor", None)
+            st.session_state["preorder_vendor_preview_override"] = True
+            st.rerun()
+    with sel_col2:
+        if st.button("取消全選", key="preorder_vendor_select_none", use_container_width=True):
+            st.session_state.pop("preorder_vendor_preview_editor", None)
+            st.session_state["preorder_vendor_preview_override"] = False
+            st.rerun()
+    override = st.session_state.pop("preorder_vendor_preview_override", None)
+    if override is not None:
+        preview = preview.copy()
+        preview["勾選"] = override
     edited_preview = st.data_editor(
         preview,
         hide_index=True,
         use_container_width=True,
         disabled=["貨號", "品名", "條碼", "sheet", "row"],
         column_config={
-            "勾選": st.column_config.CheckboxColumn("勾選", default=True),
+            "勾選": st.column_config.CheckboxColumn("勾選", default=False),
         },
         key="preorder_vendor_preview_editor",
     )
@@ -676,6 +953,21 @@ def _render_preorder_close(campaign_df, orders_df):
         st.info("沒有可結單的列（需要已填 SKU、且尚未實際關閉）。")
     else:
         st.caption(f"可結單 {len(candidates)} 列。取消勾選的列這次不鎖定。")
+        sel_col1, sel_col2 = st.columns(2)
+        with sel_col1:
+            if st.button("全選", key="preorder_lock_select_all", use_container_width=True):
+                st.session_state.pop("preorder_lock_select_editor", None)
+                st.session_state["preorder_lock_select_override"] = True
+                st.rerun()
+        with sel_col2:
+            if st.button("取消全選", key="preorder_lock_select_none", use_container_width=True):
+                st.session_state.pop("preorder_lock_select_editor", None)
+                st.session_state["preorder_lock_select_override"] = False
+                st.rerun()
+        lock_override = st.session_state.pop("preorder_lock_select_override", None)
+        if lock_override is not None:
+            candidates = candidates.copy()
+            candidates["勾選"] = lock_override
         edited_candidates = st.data_editor(
             candidates,
             hide_index=True,
@@ -1671,6 +1963,10 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
     elif sub_page == "🗓️ 預購追蹤":
         st.caption("從廠商單帶入款項、補 SKU 後對訂單、結單下載兩檔；到貨後再催款。寫回只覆寫既有雲端檔。")
         reload = st.button("重新載入預購追蹤", use_container_width=True, key="preorder_reload")
+        st.caption(
+            "重抓雲端活動表，並清空本頁所有未存檔的編輯（廠商檔快取、結單預覽、All Orders 快取等）。"
+            " 只想重抓訂單看板請用下方「3. 對客戶訂單」裡的『重新載入雲端 All Orders』。"
+        )
         if reload or "preorder_loaded" not in st.session_state:
             if reload:
                 get_cached_gdrive_file_bytes.clear()
@@ -1681,7 +1977,7 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
                 st.session_state.pop("preorder_lock_selected", None)
                 st.session_state.pop("preorder_lock_select_editor", None)
                 st.session_state.pop("preorder_vendor_history_before_lock", None)
-                _clear_preorder_sku_status_editor()
+                _clear_preorder_sku_overview_state()
                 st.session_state.pop("preorder_pending_source", None)
                 st.session_state.pop("preorder_orders_synced", None)
             loaded = load_preorder_tracker()
@@ -1711,35 +2007,29 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
             f"雲端檔：`{loaded.get('name')}`　最後修改：`{format_gdrive_time(loaded.get('modified'))}`"
         )
 
-        with st.expander("計算規則"):
-            st.markdown(
-                "只計商品名稱含「預購」的列，再依活動 SKU 對 All Orders 庫存SKU（空白才改用商品SKU）。"
-                "已取消不算進已接單。付款只認已付款／未付款（已退款不催款、不可打單）。\n\n"
-                "鎖定數量 = 自購 + min(客戶量, 上限)。匯入不覆蓋 SKU／自購／上限。"
-                "催款只含已標到貨的 SKU。官方訂單狀態見 "
-                "[SiteGiant 說明](https://support.sitegiant.com/zh/knowledge-base/how-the-order-payment-and-fulfillment-status-works-zh/#2-e8a882e596aee78b80e6858b)。"
+        st.markdown("### 🗺️ 生命週期總覽")
+        _overview_campaign_df = st.session_state.get("preorder_campaign_df", loaded["campaign"])
+        if "preorder_orders_loaded" not in st.session_state:
+            with st.spinner("⏳ 正在載入雲端最新 All Orders…"):
+                st.session_state["preorder_orders_loaded"] = load_preorder_orders()
+        _cached_orders_loaded = st.session_state.get("preorder_orders_loaded") or {}
+        _cached_orders_df = (
+            _cached_orders_loaded.get("orders") if _cached_orders_loaded.get("ok") else None
+        )
+        if _cached_orders_df is not None:
+            _overview_board = build_preorder_board(_overview_campaign_df, _cached_orders_df)
+            _render_preorder_lifecycle_overview(
+                _overview_campaign_df,
+                st.session_state.get("preorder_sku_status_df"),
+                unpaid_skus_from_board(_overview_board),
+                sku_accepted_qty_map(_overview_board),
             )
-
-        restock = probe_sg_restock_template()
-        if not restock.get("ok"):
-            st.error(f"❌ 無法讀取 SiteGiant 採購單空殼：{restock.get('reason') or '未知錯誤'}")
-        with st.expander("SiteGiant 採購單空殼（進階）"):
-            if restock.get("ok"):
-                st.caption(
-                    f"空殼可下載：`{restock.get('name')}`"
-                    f"（{restock.get('nbytes', 0)} bytes，未寫回此檔）。結單時請下載已填數量的檔。"
-                )
-                st.download_button(
-                    label="本機下載官方空殼（不會改雲端）",
-                    data=restock.get("bytes") or b"",
-                    file_name=restock.get("name") or "import_restock.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True,
-                    key="preorder_restock_shell_dl",
-                )
-            else:
-                st.caption("空殼連線失敗時，無法產出結單用的 SiteGiant 採購單。")
-
+        else:
+            _render_preorder_lifecycle_overview(
+                _overview_campaign_df,
+                st.session_state.get("preorder_sku_status_df"),
+            )
+                   
         edited = st.session_state.get("preorder_campaign_df", loaded["campaign"])
         edited = _render_preorder_vendor_import(edited)
         st.session_state["preorder_campaign_df"] = edited
