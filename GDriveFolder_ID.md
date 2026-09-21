@@ -22,4 +22,8 @@
   - download: Orders_DD-MM-YYYY-*.zip（例如 Orders_15-09-2026-1789473027.zip）
   - file format: 解壓後 Orders_DD-MM-YYYY-*.xlsx
 - 預購追蹤.xlsx: 1aqfHIPvavWZhtLZMdFCOnyHtllHLrca-
+- 預購結單紀錄: 1QKHnKi9mbOjtmaWTu7ewGTswzfk71v1b（資料夾）
+  - 彙整檔 `預購結單紀錄.xlsx`: 1YYii3cqpHF6zY_CwUkm_TdcXsEBKDHhD（只 update；個人雲端主路徑）
+  - 與 `預購追蹤.xlsx`（1aqfHIPvavWZhtLZMdFCOnyHtllHLrca-）不同檔
+  - 共用雲端硬碟時可另建 `{原檔名}_結單紀錄.xlsx`；檔名會自動去掉 `_訂量` 再加 `_結單紀錄`
 - SiteGiant 採購單空殼（只讀，勿覆寫；後台 Import Restock）: 1QZ-_PI3T2BtHjTwmrIAEG_RZKDlxhpqt

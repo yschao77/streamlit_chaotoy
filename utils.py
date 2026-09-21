@@ -90,10 +90,13 @@ ID_HISTORY_INWARD_INDEX = "12YbAlXcOdM3lFYFkh7a82yZZe7KotRNe"
 ID_PREORDER_ORDERS_FOLDER = "16XCGBr9sE5EOTqNIgZffnARDNCG0fV_m"
 ID_SITEGIANT_ALL_ORDERS_FOLDER = "1AAJ_zxEfffL24QBniL0tz_9CIhzYzCEK"
 ID_PREORDER_TRACKER = "1aqfHIPvavWZhtLZMdFCOnyHtllHLrca-"
+ID_PREORDER_VENDOR_LOCK_FOLDER = "1QKHnKi9mbOjtmaWTu7ewGTswzfk71v1b"  # 結單紀錄資料夾；個人雲端無法 API 新建
+ID_PREORDER_VENDOR_LOCK_ARCHIVE = "1YYii3cqpHF6zY_CwUkm_TdcXsEBKDHhD"  # 預購結單紀錄.xlsx；彙整用，只 update、禁止 create
 ID_SG_RESTOCK_TEMPLATE = "1QZ-_PI3T2BtHjTwmrIAEG_RZKDlxhpqt"  # SiteGiant 採購單空殼；後台 Import Restock；禁止 update
 UPC_FILLED_FILENAME = "batch_edit_upc_added_only.xlsx"
 HISTORY_INWARD_INDEX_NAME = "入庫明細索引.xlsx"
 PREORDER_TRACKER_NAME = "預購追蹤.xlsx"
+PREORDER_VENDOR_LOCK_ARCHIVE_NAME = "預購結單紀錄.xlsx"  # 個人雲端無法新建時：手動建此檔一次，之後只 update 彙整
 PREORDER_CAMPAIGN_SHEET = "活動"
 PREORDER_VENDOR_HISTORY_SHEET = "廠商單歷史"
 PREORDER_ORDERS_SHEET = "預購訂單"
@@ -111,9 +114,12 @@ PREORDER_CAMPAIGN_COLUMNS = (
     "自購",
     "上限",
     "私密連結",
+    "賣場後台連結",
     "預計關閉",
     "實際關閉",
+    "日曆事件ID",
 )
+PREORDER_CUTOFF_DATETIME_FMT = "%Y-%m-%d %H:%M"
 PREORDER_CAMPAIGN_PROTECTED_COLUMNS = (
     "月份",
     "結單日",
@@ -121,8 +127,10 @@ PREORDER_CAMPAIGN_PROTECTED_COLUMNS = (
     "自購",
     "上限",
     "私密連結",
+    "賣場後台連結",
     "預計關閉",
     "實際關閉",
+    "日曆事件ID",
 )
 PREORDER_VENDOR_HISTORY_COLUMNS = (
     "活動月份",
@@ -1751,10 +1759,46 @@ def ensure_preorder_campaign_df(df):
         out["貨號"] = out["貨號"].map(_preorder_text)
     if "廠商檔名" in out.columns:
         out["廠商檔名"] = out["廠商檔名"].map(_preorder_text)
+    for col in ("賣場後台連結", "日曆事件ID", "結單日"):
+        if col in out.columns:
+            out[col] = out[col].map(_preorder_text)
     for col in ("自購", "上限"):
         if col in out.columns:
             out[col] = pd.to_numeric(out[col], errors="coerce")
     return out
+
+
+def parse_preorder_cutoff_datetime(val):
+    """結單日須為 YYYY-MM-DD HH:mm。空字串回傳 None；格式錯回傳 False。"""
+    text = _preorder_text(val)
+    if not text:
+        return None
+    try:
+        return datetime.datetime.strptime(text, PREORDER_CUTOFF_DATETIME_FMT)
+    except ValueError:
+        return False
+
+
+def validate_preorder_campaign_cutoffs(campaign_df):
+    """有 SKU 的列結單日必填且格式 YYYY-MM-DD HH:mm。回傳錯誤字串列表（空＝通過）。"""
+    campaign = ensure_preorder_campaign_df(campaign_df)
+    errors = []
+    if campaign.empty:
+        return errors
+    for i, (_, row) in enumerate(campaign.iterrows(), start=1):
+        sku = _preorder_text(row.get("SKU"))
+        if not sku:
+            continue
+        cutoff = _preorder_text(row.get("結單日"))
+        label = _campaign_row_label(row)
+        if not cutoff:
+            errors.append(f"第 {i} 列（{label}／SKU `{sku}`）：結單日必填，格式 YYYY-MM-DD HH:mm")
+            continue
+        if parse_preorder_cutoff_datetime(cutoff) is False:
+            errors.append(
+                f"第 {i} 列（{label}／SKU `{sku}`）：結單日格式須為 YYYY-MM-DD HH:mm，目前是 `{cutoff}`"
+            )
+    return errors
 
 
 def ensure_preorder_vendor_history_df(df):
@@ -2524,6 +2568,75 @@ def stamp_preorder_first_notify(notify_df, line_keys, today=None):
     return {"notify": ensure_preorder_notify_df(out), "added": added, "today": today_text}
 
 
+def build_preorder_notify_display(notify_df, orders_df, today=None):
+    """通知紀錄畫面用：附已過天數；已付款／已退款／已取消不列。
+
+    工作表本身仍只存訂單編號／SKU／首次通知日。對不到 All Orders 的列視為仍需追蹤並保留。
+    """
+    notify = ensure_preorder_notify_df(notify_df)
+    empty_cols = ["訂單編號", "SKU", "商品名稱", "首次通知日", "已過天數"]
+    if notify.empty:
+        return pd.DataFrame(columns=empty_cols)
+
+    today = today or taipei_now().date()
+    pay_by_key = {}
+    name_by_key = {}
+    cancelled_keys = set()
+    if orders_df is not None and not getattr(orders_df, "empty", True):
+        orders = orders_df
+        if "對帳SKU" not in orders.columns or "是預購" not in orders.columns:
+            orders = prepare_preorder_orders_df(orders)
+        for _, row in orders.iterrows():
+            order_no = _preorder_text(row.get("訂單編號"))
+            sku = _preorder_text(row.get("對帳SKU")) or _preorder_text(row.get("SKU"))
+            if not order_no or not sku:
+                continue
+            key = (order_no, sku)
+            if key not in pay_by_key:
+                pay_by_key[key] = _preorder_text(row.get("付款狀態"))
+                name_by_key[key] = _preorder_text(row.get("商品名稱"))
+            if _preorder_text(row.get("訂單狀態")) == PREORDER_CANCELLED_STATUS:
+                cancelled_keys.add(key)
+
+    rows = []
+    for _, row in notify.iterrows():
+        order_no = _preorder_text(row.get("訂單編號"))
+        sku = _preorder_text(row.get("SKU"))
+        first = _preorder_text(row.get("首次通知日"))
+        if not order_no or not sku:
+            continue
+        key = (order_no, sku)
+        if key in cancelled_keys:
+            continue
+        pay = pay_by_key.get(key)
+        if pay in (PREORDER_PAID_STATUS, PREORDER_REFUNDED_STATUS):
+            continue
+        days = preorder_notify_days_value(
+            first,
+            today=today,
+            unpaid=True,
+            cancelled=False,
+            refunded=False,
+        )
+        rows.append({
+            "訂單編號": order_no,
+            "SKU": sku,
+            "商品名稱": name_by_key.get(key, ""),
+            "首次通知日": first,
+            "已過天數": days,
+        })
+    if not rows:
+        return pd.DataFrame(columns=empty_cols)
+    out = pd.DataFrame(rows)
+    out["_days_n"] = pd.to_numeric(out["已過天數"], errors="coerce").fillna(-1)
+    out = (
+        out.sort_values(["_days_n", "首次通知日"], ascending=[False, True])
+        .drop(columns=["_days_n"])
+        .reset_index(drop=True)
+    )
+    return out
+
+
 def preorder_notify_keys_from_lines(df):
     keys = []
     seen = set()
@@ -2555,8 +2668,10 @@ def campaign_df_from_arrived_skus(sku_status_df):
             "自購": "",
             "上限": "",
             "私密連結": "",
+            "賣場後台連結": "",
             "預計關閉": "",
             "實際關閉": "",
+            "日曆事件ID": "",
         })
     if not rows:
         return ensure_preorder_campaign_df(None).iloc[0:0]
@@ -2649,6 +2764,109 @@ def _openpyxl_row_values(ws, row_idx, max_col):
     return [ws.cell(row=row_idx, column=c).value for c in range(1, max_col + 1)]
 
 
+def _is_legacy_xls_filename(filename):
+    name = str(filename or "").lower()
+    return name.endswith(".xls") and not name.endswith(".xlsx")
+
+
+def _vendor_po_pandas_engines(filename=""):
+    """依環境與副檔名決定 pandas 引擎順序（calamine 可讀 xls／xlsx；xlrd 僅 xls）。"""
+    engines = []
+    if HAS_CALAMINE:
+        engines.append("calamine")
+    if _is_legacy_xls_filename(filename) or not engines:
+        if "xlrd" not in engines:
+            engines.append("xlrd")
+    return engines
+
+
+def _read_vendor_sheets_via_pandas(payload, filename=""):
+    """用 calamine／xlrd 讀各工作表為列清單（含 .xls）。"""
+    payload = payload if isinstance(payload, (bytes, bytearray)) else bytes(payload or b"")
+    errors = []
+    for engine in _vendor_po_pandas_engines(filename):
+        try:
+            xls = pd.ExcelFile(io.BytesIO(payload), engine=engine)
+            sheets = []
+            for sheet_name in xls.sheet_names:
+                df = pd.read_excel(xls, sheet_name=sheet_name, header=None, dtype=object)
+                rows = []
+                for _, series in df.iterrows():
+                    vals = []
+                    for v in series.tolist():
+                        if v is None or (isinstance(v, float) and pd.isna(v)):
+                            vals.append(None)
+                        else:
+                            try:
+                                if pd.isna(v):
+                                    vals.append(None)
+                                    continue
+                            except (ValueError, TypeError):
+                                pass
+                            vals.append(v)
+                    rows.append(vals)
+                sheets.append((str(sheet_name), rows))
+            return sheets
+        except Exception as e:
+            errors.append(f"{engine}: {e}")
+    detail = "；".join(errors) if errors else "沒有可用的 Excel 讀取引擎"
+    raise ValueError(detail)
+
+
+def _load_vendor_sheets_as_rows(payload, filename="vendor.xlsx"):
+    """回傳 [(sheet_name, rows)]；先 openpyxl（xlsx），失敗再 calamine／xlrd（含 .xls）。"""
+    payload = payload if isinstance(payload, (bytes, bytearray)) else bytes(payload or b"")
+    errors = []
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(payload), data_only=True)
+        out = []
+        for ws in wb.worksheets:
+            max_col = min(ws.max_column or 1, 40)
+            max_row = ws.max_row or 0
+            rows = [_openpyxl_row_values(ws, r, max_col) for r in range(1, max_row + 1)]
+            out.append((ws.title, rows))
+        return out
+    except Exception as e:
+        errors.append(str(e))
+    try:
+        return _read_vendor_sheets_via_pandas(payload, filename)
+    except Exception as e:
+        errors.append(str(e))
+        detail = "；".join(errors) if errors else "未知錯誤"
+        raise ValueError(detail) from e
+
+
+def _xls_bytes_to_openpyxl_wb(payload, filename=""):
+    """把 .xls（或 openpyxl 打不開的檔）轉成僅含儲存格值的 openpyxl 工作簿，供回填訂量。"""
+    sheets = _read_vendor_sheets_via_pandas(payload, filename)
+    wb = openpyxl.Workbook()
+    default = wb.active
+    wb.remove(default)
+    if not sheets:
+        wb.create_sheet(title="Sheet1")
+        return wb
+    for sheet_name, rows in sheets:
+        title = str(sheet_name or "Sheet")[:31] or "Sheet"
+        ws = wb.create_sheet(title=title)
+        for r_idx, row in enumerate(rows, start=1):
+            for c_idx, val in enumerate(row or [], start=1):
+                if val is None:
+                    continue
+                if isinstance(val, float) and pd.isna(val):
+                    continue
+                ws.cell(row=r_idx, column=c_idx, value=val)
+    return wb
+
+
+def _load_vendor_workbook_for_edit(payload, filename="vendor.xlsx"):
+    """回填訂量用：xlsx 用 openpyxl 保留版面；失敗或真 .xls 則轉值工作簿再改訂量。"""
+    payload = payload if isinstance(payload, (bytes, bytearray)) else bytes(payload or b"")
+    try:
+        return openpyxl.load_workbook(io.BytesIO(payload))
+    except Exception:
+        return _xls_bytes_to_openpyxl_wb(payload, filename)
+
+
 def _find_vendor_header_map(values):
     names = [_cell_plain(v) for v in values]
     if not any(names):
@@ -2673,41 +2891,64 @@ def _find_vendor_header_map(values):
 
 
 def parse_vendor_po_bytes(file_bytes, filename="vendor.xlsx"):
-    """讀廠商訂購單商品列。表頭不一定在第 1 列；條碼可空。"""
+    """讀廠商訂購單商品列。表頭不一定在第 1 列；條碼可空。支援 .xlsx／.xls。"""
     payload = file_bytes if isinstance(file_bytes, (bytes, bytearray)) else bytes(file_bytes or b"")
     name = filename or "vendor.xlsx"
     try:
-        wb = openpyxl.load_workbook(io.BytesIO(payload), data_only=True)
+        sheets = _load_vendor_sheets_as_rows(payload, name)
     except Exception as e:
-        return {"ok": False, "reason": f"無法開啟廠商檔，請另存 xlsx。{e}", "filename": name}
+        return {
+            "ok": False,
+            "reason": f"無法開啟廠商檔（xlsx／xls）。{e}",
+            "filename": name,
+        }
 
     rows = []
     headers_found = []
-    for ws in wb.worksheets:
-        max_col = min(ws.max_column or 1, 40)
+    for sheet_title, sheet_rows in sheets:
+        if not sheet_rows:
+            continue
+        max_col = min(max((len(r) for r in sheet_rows), default=1), 40)
         header_row = None
         header_map = None
-        scan_to = min(ws.max_row or 1, 20)
-        for r in range(1, scan_to + 1):
-            found = _find_vendor_header_map(_openpyxl_row_values(ws, r, max_col))
+        scan_to = min(len(sheet_rows), 20)
+        for r in range(scan_to):
+            vals = list(sheet_rows[r] or [])
+            if len(vals) < max_col:
+                vals = vals + [None] * (max_col - len(vals))
+            found = _find_vendor_header_map(vals[:max_col])
             if found:
                 header_row = r
                 header_map = found
                 break
         if not header_map:
             continue
-        headers_found.append(ws.title)
-        max_row = ws.max_row or header_row
-        for r in range(header_row + 1, max_row + 1):
-            vals = _openpyxl_row_values(ws, r, max(header_map["width"], max_col))
-            barcode = clean_barcode(vals[header_map["barcode"]]) if header_map["barcode"] is not None else ""
-            item_no = _preorder_text(vals[header_map["item"]]) if header_map["item"] is not None else ""
-            pname = _preorder_text(vals[header_map["name"]]) if header_map["name"] is not None else ""
+        headers_found.append(sheet_title)
+        for r in range(header_row + 1, len(sheet_rows)):
+            vals = list(sheet_rows[r] or [])
+            need = max(header_map["width"], max_col)
+            if len(vals) < need:
+                vals = vals + [None] * (need - len(vals))
+            barcode = (
+                clean_barcode(vals[header_map["barcode"]])
+                if header_map["barcode"] is not None
+                else ""
+            )
+            item_no = (
+                _preorder_text(vals[header_map["item"]])
+                if header_map["item"] is not None
+                else ""
+            )
+            pname = (
+                _preorder_text(vals[header_map["name"]])
+                if header_map["name"] is not None
+                else ""
+            )
             if not barcode and not item_no and not pname:
                 continue
             rows.append({
-                "sheet": ws.title,
-                "row": r,
+                "sheet": sheet_title,
+                "row": r + 1,
                 "貨號": item_no,
                 "品名": pname,
                 "條碼": barcode,
@@ -3298,13 +3539,13 @@ def _match_locked_to_vendor_row(locked_rows, barcode, item_no):
 
 
 def fill_vendor_po_qty_bytes(file_bytes, locked_rows, filename="vendor.xlsx"):
-    """只改訂量儲存格，保留版面與圖。先條碼、沒條碼再貨號。"""
+    """只改訂量儲存格，保留版面與圖（xlsx）。.xls 會先轉成值工作簿再回填，輸出仍為 xlsx。"""
     payload = file_bytes if isinstance(file_bytes, (bytes, bytearray)) else bytes(file_bytes or b"")
     name = filename or "vendor.xlsx"
     try:
-        wb = openpyxl.load_workbook(io.BytesIO(payload))
+        wb = _load_vendor_workbook_for_edit(payload, name)
     except Exception as e:
-        return {"ok": False, "reason": f"無法開啟廠商檔，請另存 xlsx。{e}", "filename": name}
+        return {"ok": False, "reason": f"無法開啟廠商檔（xlsx／xls）。{e}", "filename": name}
 
     filled = 0
     vendor_unmatched = []
@@ -3339,7 +3580,7 @@ def fill_vendor_po_qty_bytes(file_bytes, locked_rows, filename="vendor.xlsx"):
                     "貨號": item_no,
                     "品名": pname,
                     "條碼": barcode,
-                    "原因": "活動表沒有對應列或該列未鎖定",
+                    "原因": "未鎖定／未開放預購（可忽略）",
                 })
                 continue
             key = (matched.get("SKU"), matched.get("條碼"), matched.get("貨號"))
@@ -3372,6 +3613,136 @@ def fill_vendor_po_qty_bytes(file_bytes, locked_rows, filename="vendor.xlsx"):
         "vendor_unmatched": vendor_unmatched,
         "campaign_unmatched": campaign_unmatched,
     }
+
+
+def preorder_vendor_lock_record_filename(vendor_name):
+    """把廠商原檔檔名換算成結單紀錄檔名：同 stem，副檔名固定 .xlsx，尾綴「_結單紀錄」。
+
+    若 stem 已帶「_訂量」（下載回填檔再上傳），先剝掉再加尾綴，避免變成「_訂量_結單紀錄」。
+    """
+    name = str(vendor_name or "vendor.xlsx")
+    stem = name.rsplit(".", 1)[0] if "." in name else name
+    if stem.endswith("_訂量"):
+        stem = stem[: -len("_訂量")]
+    return f"{stem}_結單紀錄.xlsx"
+
+
+def _is_gdrive_storage_quota_error(exc):
+    msg = str(exc).lower()
+    return "storagequotaexceeded" in msg or "do not have storage quota" in msg
+
+
+def _copy_worksheet_values(src_ws, dst_wb, title):
+    title = str(title or "Sheet")[:31] or "Sheet"
+    if title in dst_wb.sheetnames:
+        del dst_wb[title]
+    dst_ws = dst_wb.create_sheet(title=title)
+    for row in src_ws.iter_rows():
+        for cell in row:
+            if cell.value is None:
+                continue
+            dst_ws.cell(row=cell.row, column=cell.column, value=cell.value)
+    return dst_ws
+
+
+def _merge_vendor_lock_into_archive_bytes(archive_bytes, filled_bytes, vendor_name):
+    """把本次已填訂量工作表併入彙整檔（工作表名含 stem，同名覆寫）。"""
+    archive_wb = openpyxl.load_workbook(io.BytesIO(archive_bytes))
+    filled_wb = openpyxl.load_workbook(io.BytesIO(filled_bytes))
+    stem = preorder_vendor_lock_record_filename(vendor_name).rsplit(".", 1)[0]
+    # 去掉尾綴「_結單紀錄」當工作表前綴
+    prefix = stem[: -len("_結單紀錄")] if stem.endswith("_結單紀錄") else stem
+    prefix = (prefix or "vendor")[:20]
+    for i, src_ws in enumerate(filled_wb.worksheets):
+        suffix = src_ws.title[:8] if len(filled_wb.worksheets) > 1 else ""
+        title = f"{prefix}_{suffix}" if suffix else prefix
+        title = title[:31]
+        _copy_worksheet_values(src_ws, archive_wb, title)
+    # 拿掉 openpyxl 預設空 Sheet（若還在且已有其他表）
+    if "Sheet" in archive_wb.sheetnames and len(archive_wb.sheetnames) > 1:
+        try:
+            del archive_wb["Sheet"]
+        except Exception:
+            pass
+    out = io.BytesIO()
+    archive_wb.save(out)
+    return out.getvalue()
+
+
+def sync_preorder_vendor_lock_record(file_bytes, vendor_name):
+    """結單時同步已填訂量廠商檔到結單紀錄。
+
+    1) 資料夾內若已有同名「{stem}_結單紀錄.xlsx」→ 只 update 該檔
+    2) 否則若有 ID_PREORDER_VENDOR_LOCK_ARCHIVE → 併入「預購結單紀錄.xlsx」後 update（個人雲端主路徑）
+    3) 否則才嘗試 create 逐檔（僅共用雲端硬碟可行）
+    """
+    if not ID_PREORDER_VENDOR_LOCK_FOLDER and not ID_PREORDER_VENDOR_LOCK_ARCHIVE:
+        return {"ok": False, "reason": "未設定結單紀錄資料夾／彙整檔 ID。"}
+    target_name = preorder_vendor_lock_record_filename(vendor_name)
+    payload = file_bytes if isinstance(file_bytes, (bytes, bytearray)) else bytes(file_bytes or b"")
+    if not payload:
+        return {"ok": False, "reason": "沒有可同步的檔案內容。", "filename": target_name}
+
+    def _list_exact(name):
+        if not ID_PREORDER_VENDOR_LOCK_FOLDER:
+            return None
+        files = _list_gdrive_files_raw(
+            ID_PREORDER_VENDOR_LOCK_FOLDER, name_contains=name
+        )
+        return next((f["id"] for f in files if f.get("name") == name), None)
+
+    try:
+        existing_id = _list_exact(target_name) if ID_PREORDER_VENDOR_LOCK_FOLDER else None
+        if existing_id:
+            upload_or_update_gdrive_file(
+                ID_PREORDER_VENDOR_LOCK_FOLDER,
+                target_name,
+                payload,
+                existing_file_id=existing_id,
+                allow_create=False,
+            )
+            return {"ok": True, "filename": target_name, "mode": "update"}
+
+        # 個人雲端主路徑：固定彙整檔只 update（有 file id 就不先 create，避免每次 403）
+        if ID_PREORDER_VENDOR_LOCK_ARCHIVE:
+            archive_bytes = download_gdrive_file_to_bytes(
+                ID_PREORDER_VENDOR_LOCK_ARCHIVE
+            ).getvalue()
+            merged = _merge_vendor_lock_into_archive_bytes(
+                archive_bytes, payload, vendor_name
+            )
+            upload_or_update_gdrive_file(
+                ID_PREORDER_VENDOR_LOCK_FOLDER or "",
+                PREORDER_VENDOR_LOCK_ARCHIVE_NAME,
+                merged,
+                existing_file_id=ID_PREORDER_VENDOR_LOCK_ARCHIVE,
+                allow_create=False,
+            )
+            return {
+                "ok": True,
+                "filename": PREORDER_VENDOR_LOCK_ARCHIVE_NAME,
+                "mode": "archive",
+                "member": target_name,
+            }
+
+        # 無彙整 file id 時才嘗試 create（共用雲端硬碟）
+        upload_or_update_gdrive_file(
+            ID_PREORDER_VENDOR_LOCK_FOLDER,
+            target_name,
+            payload,
+            existing_file_id=None,
+            allow_create=True,
+        )
+        return {"ok": True, "filename": target_name, "mode": "create"}
+    except Exception as e:
+        reason = _status_error_text(e)
+        if _is_gdrive_storage_quota_error(e):
+            reason = (
+                "Service Account 無法新建檔。請確認彙整檔 "
+                f"「{PREORDER_VENDOR_LOCK_ARCHIVE_NAME}」（{ID_PREORDER_VENDOR_LOCK_ARCHIVE}）"
+                "已分享給 SA 編輯權，或改用共用雲端硬碟。"
+            )
+        return {"ok": False, "reason": reason, "filename": target_name}
 
 
 def _find_restock_header_map(values):

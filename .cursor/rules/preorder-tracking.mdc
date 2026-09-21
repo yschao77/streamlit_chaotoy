@@ -6,14 +6,14 @@ alwaysApply: false
 # 預購追蹤（streamlit_chaotoy）
 
 - 不接 SiteGiant Open API、不接綠界 API。Excel／Drive 進出；綠界金流／物流只在 SiteGiant 後台開。
-- 新子頁掛 Sitegiant 模組；邏輯放 `utils.py`，畫面放 `views/`。`預購追蹤.xlsx` 須先手動建檔再覆寫（禁止 API 新建）。
+- 新子頁掛 Sitegiant 模組；邏輯放 `utils.py`，畫面放 `views/`。`預購追蹤.xlsx` 須先手動建檔再覆寫（禁止 API 新建）。唯一例外資料夾是 `ID_PREORDER_VENDOR_LOCK_FOLDER`（結單紀錄同步：同名覆寫、沒有則新建；跟受保護的主檔無關）。
 - 訂單／付款狀態對齊官方說明：https://support.sitegiant.com/zh/knowledge-base/how-the-order-payment-and-fulfillment-status-works-zh/
 - 看板兩欄：已付款／未付款。不看付款方式、不拆貨到付款。
 - All Orders 預購列：商品名稱含「預購」（蝦皮與官網同一規則，不過濾商城）。再依庫存SKU（空白才商品SKU）對活動表 SKU。
-- 工作表 `預購訂單` 是 All Orders 快照（每次整表覆寫），不是官方訂單狀態「待處理」。`SKU狀態` 預設預購，標到貨才催款。`通知紀錄` 以訂單編號+SKU 存首次通知日。
+- 工作表 `預購訂單` 是 All Orders 快照（每次整表覆寫），不是官方訂單狀態「待處理」。`SKU狀態` 預設預購，在「5. 到貨催款」標到貨才催款（第 3 段看板狀態唯讀）。`通知紀錄` 以訂單編號+SKU 存首次通知日。催款「已通知」按鈕一按即覆寫雲端，文字須含「且覆寫雲端預購追蹤」。
 - 催款：到貨 SKU × 未付款 × 非已取消 × 非已退款。可打單：到貨 SKU × 已付款 × 訂單狀態＝待處理。
-- 廠商訂購單可勾選匯入活動表（沒條碼也可）。upsert：條碼 → 廠商檔名+貨號 → 檔名+品名。不覆蓋 SKU／自購／上限。已填「實際關閉」的列不覆寫貨號／品名／條碼。
-- 結單後才鎖定 `自購 + min(客戶量, 上限)`。畫面勾選要結的列；未勾選、已實際關閉的列不重算訂量。回填原檔只改訂量（先條碼、再貨號）。SiteGiant 採購單（後台 Import Restock）填空殼後只本機下載，禁止覆寫 `ID_SG_RESTOCK_TEMPLATE`。
+- 廠商訂購單可勾選匯入活動表（沒條碼也可；支援 `.xlsx`／`.xls`）。upsert：條碼 → 廠商檔名+貨號 → 檔名+品名。不覆蓋 SKU／自購／上限。已填「實際關閉」的列不覆寫貨號／品名／條碼。
+- 結單後才鎖定 `自購 + min(客戶量, 上限)`。畫面勾選要結的列；未勾選、已實際關閉的列不重算訂量。回填原檔只改訂量（先條碼、再貨號；`.xls` 會轉值後回填，輸出仍為 xlsx）。SiteGiant 採購單（後台 Import Restock）填空殼後只本機下載，禁止覆寫 `ID_SG_RESTOCK_TEMPLATE`。
 - 補賣場資料：已關閉列鎖自購／上限／SKU／月份／結單日（改了還原）；品名／私密連結／條碼／貨號可改。清空實際關閉＝重開。
 - All Orders 讀 `ID_SITEGIANT_ALL_ORDERS_FOLDER` 最新 `Orders_DD-MM-YYYY-*.zip`（依檔名日期，同日比流水號），解成 xlsx 才解析。
 - 廠商單表頭別名對齊麗嬰合併：品名（名稱／中文品名／品名規格／Description）、條碼（條碼型號／JAN CODE）、貨號（料品編號／Item No）。
