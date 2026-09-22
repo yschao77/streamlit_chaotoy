@@ -9,8 +9,9 @@ alwaysApply: false
 ## 連線與檔案 ID
 
 - Service：`st.secrets["textkey"]`，CLI / GitHub Actions 用 `GOOGLE_SERVICE_ACCOUNT_JSON`
-- 資料夾常數與來源目錄在 `utils.py` 的 `TRACKED_SOURCES`。**禁止 API 新建檔**（含 `files.create` / `files.copy`）；service account 沒有 Drive 配額，只能 `update` 已存在的檔。Sitegiant_UPC 請先手動放 `batch_edit_upc_added_only.xlsx`，沒有 `existing_file_id` 就停止。唯一例外：`ID_PREORDER_VENDOR_LOCK_FOLDER`（結單紀錄；同名覆寫、沒有則 `allow_create=True`）。
-- 新資料夾必須把 service account（`textkey` 的 `client_email`）加為檢視者，否則 `files.list` 會是空的。
+- 資料夾常數與來源目錄在 `utils.py` 的 `TRACKED_SOURCES`。**禁止 API 新建檔**（含 `files.create` / `files.copy`）；service account 在個人雲端**無儲存配額**，只能 `update` 已存在的檔。Sitegiant_UPC 請先手動放 `batch_edit_upc_added_only.xlsx`，沒有 `existing_file_id` 就停止。
+- **結單紀錄例外（次要才 create）**：主路徑 update `ID_PREORDER_VENDOR_LOCK_ARCHIVE`（`預購結單紀錄.xlsx`，與 `ID_PREORDER_TRACKER` 不同檔）。資料夾內已有同名 `{stem}_結單紀錄.xlsx` 時 update 該檔。僅在無彙整 file id、且環境允許時（如共用雲端硬碟）才 `allow_create=True`；不要假設個人雲端 create 會成功。
+- 新資料夾必須把 service account（`textkey` 的 `client_email`）加為編輯／內容管理員（要寫檔）或至少檢視者（只 list），否則 `files.list` 會是空的或 update 403。
 - 選最新檔用 `pick_latest_gdrive_file`（解析檔名日期，不要只靠檔名排序）。Sitegiant 來源可含 zip，用 `download_source_spreadsheet` 解出 xlsx。
 
 | 常數 | 用途與檔名 |
@@ -28,6 +29,7 @@ alwaysApply: false
 ## 讀寫引擎
 
 - 只讀可用 calamine；寫回 xlsm：`keep_vba=True`
+- 廠商訂購單支援 `.xlsx`／`.xls`（xls 用 calamine／xlrd 讀；回填輸出仍為 xlsx）
 - 條碼欄寫入前 `clean_barcode`，儲存格 `@`
 
 ## 工作表與對鍵
@@ -37,7 +39,8 @@ alwaysApply: false
 | 麗嬰採購產品總表.xlsm | `麗嬰國際產品總表`、`已處理採購單`、`刪除紀錄`、`metadata` |
 | 蝦皮賣場商品列表.xlsm | `蝦皮商品列表`、`匯入檔案` |
 | 商品蝦皮麗嬰價格統整表.xlsx | `商品蝦皮麗嬰價格統整表` |
-| 預購追蹤.xlsx | `活動`、`廠商單歷史` |
+| 預購追蹤.xlsx | `活動`、`廠商單歷史`、`預購訂單`、`SKU狀態`、`通知紀錄` |
+| 預購結單紀錄.xlsx | 彙整各次已填訂量（工作表名含廠商 stem；非追蹤主檔） |
 
 - 內部 `自定義編碼` ↔ 蝦皮 `iSKU`；內部 `c` ↔ 麗嬰 `條碼`
 - `c` ↔ batch_edit `國際條碼（UPC）` → 統整表 `sitegiant庫存SKU` = `庫存貨品名稱`

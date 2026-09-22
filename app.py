@@ -18,7 +18,7 @@ from utils import (
     clear_cloud_data_caches,
 )
 
-from views import sitegiant_page, integration_page, status_page
+from views import sitegiant_page, integration_page, status_page, preorder_page
 
 # 執行修補程式
 apply_openpyxl_patch()
@@ -259,7 +259,12 @@ st.sidebar.write("---")
 
 main_module = st.sidebar.selectbox(
     "🎯 請選擇核心管理模組：",
-    ["📡 雲端資料狀態", "🏪 Sitegiant 電商整合管理", "📦 商品蝦皮麗嬰統整管理"]
+    [
+        "📡 雲端資料狀態",
+        "🏪 Sitegiant 電商整合管理",
+        "📦 商品蝦皮麗嬰統整管理",
+        "🗓️ 預購追蹤",
+    ],
 )
 st.sidebar.write("") 
 
@@ -315,17 +320,35 @@ elif "商品蝦皮麗嬰統整管理" in main_module:
     # 👇 呼叫我們剛剛新建的整合頁面模組
     integration_page.render(sub_page, gdrive_cfg)
 
+elif "預購追蹤" in main_module:
+    st.sidebar.markdown("### 🗓️ 預購追蹤")
+    nav_target = st.session_state.pop("preorder_nav_target", None)
+    if nav_target is not None:
+        st.session_state["preorder_sub_page"] = nav_target
+    sub_page = st.sidebar.radio(
+        "請選擇執行項目：",
+        list(preorder_page.PREORDER_SUBPAGES),
+        key="preorder_sub_page",
+    )
+    preorder_page.render(sub_page)
+
 else:
     st.sidebar.markdown("### 🌐 Sitegiant 電商整合管理")
     sub_page = st.sidebar.radio(
         "請選擇執行項目：",
-        ["🔀 Sitegiant 採購入庫單格式轉換", "📜 Sitegiant 歷史入庫單紀錄", "🔍 查詢入庫紀錄", "📦 Sitegiant 批量新增UPC", "📋 採購單待處理", "🗓️ 預購追蹤"],
-        index=0
+        [
+            "🔀 Sitegiant 採購入庫單格式轉換",
+            "📜 Sitegiant 歷史入庫單紀錄",
+            "🔍 查詢入庫紀錄",
+            "📦 Sitegiant 批量新增UPC",
+            "📋 採購單待處理",
+        ],
+        index=0,
     )
     sitegiant_page.render(
-        sub_page=sub_page, 
-        ID_PRICE_SUMMARY=ID_PRICE_SUMMARY, 
-        ID_HISTORY_INWARD_FOLDER=ID_HISTORY_INWARD_FOLDER, 
+        sub_page=sub_page,
+        ID_PRICE_SUMMARY=ID_PRICE_SUMMARY,
+        ID_HISTORY_INWARD_FOLDER=ID_HISTORY_INWARD_FOLDER,
         ID_SHOPEE_MASTER=ID_SHOPEE_MASTER,
         ID_PRICE_SUMMARY_FALLBACK=ID_PRICE_SUMMARY_FALLBACK,
         ID_SITEGIANT_UPC_FOLDER=ID_SITEGIANT_UPC_FOLDER,

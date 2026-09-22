@@ -1768,19 +1768,72 @@ def ensure_preorder_campaign_df(df):
     return out
 
 
+_PREORDER_CUTOFF_PARSE_FORMATS = (
+    PREORDER_CUTOFF_DATETIME_FMT,
+    "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%d",
+)
+
+
 def parse_preorder_cutoff_datetime(val):
-    """結單日須為 YYYY-MM-DD HH:mm。空字串回傳 None；格式錯回傳 False。"""
+    """結單日解析為 datetime。空／NaT 回傳 None；格式錯回傳 False。
+
+    接受 datetime／Timestamp，以及 YYYY-MM-DD HH:mm（官方）、帶秒、僅日期。
+    """
+    if val is None:
+        return None
+    if isinstance(val, datetime.datetime):
+        try:
+            if pd.isna(val):
+                return None
+        except (TypeError, ValueError):
+            pass
+        return val.replace(microsecond=0)
+    if isinstance(val, datetime.date):
+        return datetime.datetime.combine(val, datetime.time(0, 0))
+    if isinstance(val, pd.Timestamp):
+        if pd.isna(val):
+            return None
+        return val.to_pydatetime().replace(microsecond=0)
+    try:
+        if pd.isna(val):
+            return None
+    except (TypeError, ValueError):
+        pass
     text = _preorder_text(val)
     if not text:
         return None
-    try:
-        return datetime.datetime.strptime(text, PREORDER_CUTOFF_DATETIME_FMT)
-    except ValueError:
-        return False
+    for fmt in _PREORDER_CUTOFF_PARSE_FORMATS:
+        try:
+            return datetime.datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    return False
+
+
+def cutoff_to_datetime(val):
+    """給 data_editor DatetimeColumn 用：可解析 → datetime，空／錯 → NaT。"""
+    parsed = parse_preorder_cutoff_datetime(val)
+    if parsed is None or parsed is False:
+        return pd.NaT
+    return parsed
+
+
+def format_preorder_cutoff_datetime(val):
+    """寫回活動表／Excel 的字串 YYYY-MM-DD HH:mm；空／NaT → \"\"。
+
+    解析失敗時保留原文字串，讓 validate_preorder_campaign_cutoffs 回報。
+    """
+    parsed = parse_preorder_cutoff_datetime(val)
+    if parsed is None:
+        return ""
+    if parsed is False:
+        return _preorder_text(val)
+    return parsed.strftime(PREORDER_CUTOFF_DATETIME_FMT)
 
 
 def validate_preorder_campaign_cutoffs(campaign_df):
-    """有 SKU 的列結單日必填且格式 YYYY-MM-DD HH:mm。回傳錯誤字串列表（空＝通過）。"""
+    """有 SKU 的列結單日必填且可解析為 YYYY-MM-DD HH:mm。回傳錯誤字串列表（空＝通過）。"""
     campaign = ensure_preorder_campaign_df(campaign_df)
     errors = []
     if campaign.empty:
@@ -1789,14 +1842,17 @@ def validate_preorder_campaign_cutoffs(campaign_df):
         sku = _preorder_text(row.get("SKU"))
         if not sku:
             continue
-        cutoff = _preorder_text(row.get("結單日"))
+        raw = row.get("結單日")
         label = _campaign_row_label(row)
-        if not cutoff:
-            errors.append(f"第 {i} 列（{label}／SKU `{sku}`）：結單日必填，格式 YYYY-MM-DD HH:mm")
-            continue
-        if parse_preorder_cutoff_datetime(cutoff) is False:
+        parsed = parse_preorder_cutoff_datetime(raw)
+        if parsed is None:
             errors.append(
-                f"第 {i} 列（{label}／SKU `{sku}`）：結單日格式須為 YYYY-MM-DD HH:mm，目前是 `{cutoff}`"
+                f"第 {i} 列（{label}／SKU `{sku}`）：結單日必填，請用結單日欄的日期時間挑選器填寫"
+            )
+            continue
+        if parsed is False:
+            errors.append(
+                f"第 {i} 列（{label}／SKU `{sku}`）：結單日無法辨識（請用挑選器），目前是 `{_preorder_text(raw)}`"
             )
     return errors
 

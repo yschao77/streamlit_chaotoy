@@ -21,13 +21,14 @@ def render(sub_page, cfg):
         ...
 ```
 
-## 三個模組（標籤字串必須對得上 `if sub_page ==`）
+## 四個模組（標籤字串必須對得上 `if sub_page ==`）
 
 1. 雲端資料狀態：各表最新修改時間
 2. Sitegiant：採購入庫轉換、歷史入庫、批量 UPC、採購單待處理
 3. 統整管理：三表整合、麗嬰合併審核、蝦皮清單轉換、歷史/查詢
+4. 預購追蹤：總覽／建檔／對訂單／結單／到貨催款（`preorder_page.render`）
 
-新子頁：先加 `radio` 選項，再在對應 `views/*.py` 加分支。`integration_page.render(sub_page, gdrive_cfg)`；`status_page.render(sub_page, gdrive_cfg)`；`sitegiant_page` 傳個別 Drive ID。
+新子頁：先加 `radio` 選項，再在對應 `views/*.py` 加分支。`integration_page.render(sub_page, gdrive_cfg)`；`status_page.render(sub_page, gdrive_cfg)`；`sitegiant_page` 傳個別 Drive ID；`preorder_page.render(sub_page)`。預購不要再掛回 Sitegiant。
 
 ## 畫面慣例
 
