@@ -5,9 +5,9 @@ name: Sync Drive sources
 # external scheduler start a run when GitHub's own cron queue drops the schedule.
 on:
   schedule:
-    # 09:15 Taipei. Cron is UTC only and the hour field must be 0-23,
-    # so Taipei time minus 8 hours: 10:03 -> 02:03 UTC.
-    - cron: "03 2 * * *"
+    # 09:07 Taipei. Cron is UTC only and the hour field must be 0-23,
+    # so Taipei time minus 8 hours: 09:07 -> 01:07 UTC.
+    - cron: "07 1 * * *"
   workflow_dispatch:
   repository_dispatch:
     types: [sync-drive]
