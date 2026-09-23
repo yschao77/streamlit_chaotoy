@@ -24,7 +24,6 @@ def render(sub_page, cfg):
     cfg 包含所有從 app.py 傳來的檔案 ID 與 metadata
     """
     st.title(f"{sub_page}")
-    st.info(f"目前導覽路徑： 📦 商品蝦皮麗嬰統整管理 ➔ {sub_page}")
     st.write("---")
 
     # 內建全域獨立功能：三表 PowerQuery 整合、計算財務指標
@@ -76,58 +75,58 @@ def render(sub_page, cfg):
     # 邏輯區塊：根據 sub_page 呈現功能
     # -------------------------------------------------------------------------
     if sub_page == "📊 PowerQuery 三表整合歷史紀錄":
-        st.subheader("🔄 三表整合歷史紀錄追蹤")
+        st.subheader("三表整合歷史")
         hist_pq_files = list_gdrive_files(cfg['ID_PRICE_SUMMARY_FOLDER'])
         if not hist_pq_files:
-            st.warning(f"💡 提示：目前雲端資料夾內尚無任何歷史檔案，請至『🧠 PowerQuery 三表整合』執行新建轉換。")
+            st.warning("雲端尚無歷史檔，請先到「PowerQuery 執行三表整合」產生。")
         else:
             file_options = {f['name']: f['id'] for f in hist_pq_files}
-            selected_pq_file = st.selectbox("🎯 請選擇欲調閱的歷史整合報告：", list(file_options.keys()))
+            selected_pq_file = st.selectbox("選擇歷史整合報告", list(file_options.keys()))
             
             if selected_pq_file:
                 try:
                     target_id = file_options[selected_pq_file]
                     file_bytes = download_gdrive_file_to_bytes(target_id)
                     df_pq_view = pd.read_excel(file_bytes, engine="calamine" if HAS_CALAMINE else None)
-                    st.markdown(f"📄 **目前調閱雲端檔案**：`{selected_pq_file}` ｜ 📊 **資料總項數**：`{len(df_pq_view)} 筆`")
+                    st.caption(f"`{selected_pq_file}`　{len(df_pq_view)} 筆")
                     st.dataframe(df_pq_view, use_container_width=True)
-                    st.download_button(label="🔄 重新下載此歷史整合表 (.xlsx)", data=file_bytes.getvalue(), file_name=selected_pq_file, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                    st.download_button(label="下載此歷史整合表", data=file_bytes.getvalue(), file_name=selected_pq_file, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                 except Exception as e:
                     st.error(f"❌ 讀取雲端備份檔案失敗: {str(e)}")
 
     elif sub_page == "🧠 PowerQuery 執行三表整合":
-        st.subheader("🔍 三表數據追蹤")
+        st.subheader("三表來源狀態")
         
         c1, c2, c3 = st.columns(3)
         with c1:
-            st.metric("📦 商品列表 (商品iSKU清單)", "已對接" if cfg['ID_LOCAL_PROD'] else "❌ 未偵測到")
-            st.caption(f"📅 最後修改時間: \n`{format_gdrive_time(cfg['TIME_PROD'])}`")
+            st.metric("商品列表 (商品iSKU清單)", "已對接" if cfg['ID_LOCAL_PROD'] else "❌ 未偵測到")
+            st.caption(f"最後修改：`{format_gdrive_time(cfg['TIME_PROD'])}`")
         with c2:
-            st.metric("🧡 蝦皮資料庫主表", "已對接" if cfg['ID_SHOPEE_MASTER'] else "❌ 未偵測到")
-            st.caption(f"📅 最後修改時間: \n`{format_gdrive_time(cfg['TIME_SHOPEE'])}`")
+            st.metric("蝦皮資料庫主表", "已對接" if cfg['ID_SHOPEE_MASTER'] else "❌ 未偵測到")
+            st.caption(f"最後修改：`{format_gdrive_time(cfg['TIME_SHOPEE'])}`")
         with c3:
-            st.metric("🧸 麗嬰產品總表", "已對接" if cfg['ID_MASTER_FILE'] else "❌ 未偵測到")
-            st.caption(f"📅 最後修改時間: \n`{format_gdrive_time(cfg['TIME_MASTER'])}`")
+            st.metric("麗嬰產品總表", "已對接" if cfg['ID_MASTER_FILE'] else "❌ 未偵測到")
+            st.caption(f"最後修改：`{format_gdrive_time(cfg['TIME_MASTER'])}`")
 
         st.write("---")
 
-        st.subheader("📊 雲端『商品蝦皮麗嬰價格統整表』當前狀態")
+        st.subheader("雲端統整表狀態")
         existing_summary_id, existing_summary_time, _ = get_cached_gdrive_id(cfg['ID_PRICE_SUMMARY_FOLDER'], "商品蝦皮麗嬰價格統整表")
         
         if existing_summary_id:
-            st.info(f"🟢 雲端已存在統整表檔案 ｜ 📅 最後修改時間：`{format_gdrive_time(existing_summary_time)}`")
+            st.caption(f"統整表已存在｜最後修改：`{format_gdrive_time(existing_summary_time)}`")
         else:
-            st.warning("⚠️ 雲端目前尚未建立『商品蝦皮麗嬰價格統整表』，回寫時系統將會自動全新建立。")
+            st.warning("雲端尚未建立統整表；回寫時會新建。")
 
         batch_preview = pick_latest_gdrive_file(cfg.get('ID_SITEGIANT_BATCH_FOLDER'), "batch_edit_basic_info_all", "batch_edit")
         if batch_preview:
-            st.info(f"🧩 Sitegiant batch_edit 將使用：`{batch_preview['name']}` ｜ 📅 雲端修改：`{format_gdrive_time(batch_preview.get('modifiedTime'))}`")
+            st.caption(f"batch_edit：`{batch_preview['name']}`｜`{format_gdrive_time(batch_preview.get('modifiedTime'))}`")
         else:
-            st.warning("⚠️ 找不到 `batch_edit_basic_info_all_DD-MM-YYYY-*.xlsx`，統整表 `sitegiant庫存SKU` 將留空。")
+            st.warning("找不到 `batch_edit_basic_info_all_DD-MM-YYYY-*.xlsx`，`sitegiant庫存SKU` 將留空。")
 
         st.write("---")
 
-        if st.button("🛠️ 啟動三表整合與財務指標計算", type="primary", use_container_width=True):
+        if st.button("執行三表整合", type="primary", use_container_width=True):
             if not (cfg['ID_LOCAL_PROD'] and cfg['ID_SHOPEE_MASTER'] and cfg['ID_MASTER_FILE']):
                 st.error("❌ 無法啟動三表整合！請確認雲端對應資料夾內是否缺少必要的核心資料主檔案。")
             else:
@@ -141,17 +140,17 @@ def render(sub_page, cfg):
                         )
                         st.session_state['pq_result'] = df_final
                         st.session_state['pq_batch_meta'] = batch_meta
-                        st.success("🎉 三表 PowerQuery 交叉聯結與財務指標計算整合完成！")
+                        st.success("三表整合完成。")
                     except Exception as e:
                         st.error(f"❌ 錯誤: {str(e)}")
 
         if 'pq_result' in st.session_state and st.session_state['pq_result'] is not None:
             df_result = st.session_state['pq_result']
             batch_used = st.session_state.get('pq_batch_meta')
-            st.subheader("📋 整合聯結情報報表輸出預覽")
+            st.subheader("預覽結果")
             if batch_used:
                 st.caption(f"sitegiant庫存SKU 來源：`{batch_used.get('name')}`")
-            st.markdown(f"📊 **目前整合結果資料總項數**：`{len(df_result)} 筆`")
+            st.caption(f"{len(df_result)} 筆")
             st.dataframe(df_result, use_container_width=True)
             
             col_btn1, col_btn2 = st.columns(2)
@@ -160,7 +159,7 @@ def render(sub_page, cfg):
                 with pd.ExcelWriter(towrite_pq, engine='openpyxl') as writer:
                     df_result.to_excel(writer, index=False, sheet_name="PowerQuery三表整合")
                 st.download_button(
-                    label="📥 匯出並下載此三表整合交叉比對表 (.xlsx)", 
+                    label="下載 Excel", 
                     data=towrite_pq.getvalue(), 
                     file_name=f"三表整合比對結果_{datetime.date.today().strftime('%Y%m%d')}.xlsx", 
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -168,21 +167,20 @@ def render(sub_page, cfg):
                 )
                 
             with col_btn2:
-                if st.button("🔄 執行：將整合結果回寫並更新至雲端", type="secondary", use_container_width=True):
+                if st.button("寫回雲端統整表", type="secondary", use_container_width=True):
                     with st.spinner("💾 正在覆寫更新雲端現有統整表檔案..."):
                         if run_powerquery_and_update_gdrive(df_to_save=df_result):
-                            st.success("✅ 雲端統整表已成功同步覆寫更新！")
-                            st.info("💡 重新整理頁面後，上方將會顯示最新的修改時間。")
+                            st.success("雲端統整表已更新。")
 
     elif sub_page == "🔍 麗嬰商品總表數據查詢":
-        st.subheader("📋 麗嬰採購產品總表資料庫分頁動態檢視")
+        st.subheader("麗嬰總表分頁檢視")
         
         _, _, _, _, all_sheets, _ = load_master_data(cfg['ID_MASTER_FILE'])
         
         if all_sheets:
             view_sheets = [s for s in all_sheets if s != "麗嬰產品新採購單"]
-            selected_sheet = st.selectbox("請選擇數據分頁：", view_sheets)
-            search_mode = st.radio("🎯 請選擇查詢模式：", ["多筆條碼價格查詢", "多筆庫存SKU查詢", "模糊關鍵字搜尋"], horizontal=True)
+            selected_sheet = st.selectbox("選擇分頁", view_sheets)
+            search_mode = st.radio("查詢模式", ["多筆條碼價格查詢", "多筆庫存SKU查詢", "模糊關鍵字搜尋"], horizontal=True)
             
             try:
                 file_bytes = get_cached_gdrive_file_bytes(cfg['ID_MASTER_FILE'])
@@ -191,10 +189,10 @@ def render(sub_page, cfg):
                 
                 if search_mode == "多筆條碼價格查詢":
                     if "條碼" not in df_view.columns:
-                        st.warning(f"⚠️ 當前選擇的分頁 【{selected_sheet}】 內部不含「條碼」欄位。")
+                        st.warning(f"分頁【{selected_sheet}】不含「條碼」欄位。")
                     else:
                         df_view['條碼'] = df_view['條碼'].apply(clean_barcode)
-                        barcode_paste = st.text_area("📋 請貼上多筆國際條碼 (換行、空格或逗號隔開)：", height=120)
+                        barcode_paste = st.text_area("貼上多筆國際條碼（換行、空格或逗號分隔）", height=120)
                         
                         if barcode_paste.strip():
                             import re
@@ -203,7 +201,7 @@ def render(sub_page, cfg):
                             
                             if cleaned_barcodes:
                                 df_result = df_view[df_view['條碼'].isin(cleaned_barcodes)].copy()
-                                st.success(f"🔍 查詢完畢！成功比對出 {len(df_result)} 筆商品資料。")
+                                st.success(f"找到 {len(df_result)} 筆。")
                                 
                                 important_cols = ["條碼", "名稱", "零售價", "含稅"]
                                 display_cols = [c for c in important_cols if c in df_result.columns] + [c for c in df_result.columns if c not in important_cols]
@@ -212,32 +210,32 @@ def render(sub_page, cfg):
                                 towrite_query = io.BytesIO()
                                 with pd.ExcelWriter(towrite_query, engine='openpyxl') as writer:
                                     df_result[display_cols].to_excel(writer, index=False, sheet_name="條碼查詢結果")
-                                st.download_button("📥 下載本次條碼查詢結果報表 (.xlsx)", data=towrite_query.getvalue(), file_name=f"條碼批次查詢結果_{datetime.date.today().strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                                st.download_button("下載條碼查詢結果", data=towrite_query.getvalue(), file_name=f"條碼批次查詢結果_{datetime.date.today().strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                 
                 elif search_mode == "多筆庫存SKU查詢":
                     sku_col_candidate = next((c for c in ["庫存SKU", "自定義編碼", "商品編號", "貨號"] if c in df_view.columns), None)
                     if not sku_col_candidate:
-                        st.warning(f"⚠️ 當前選擇的分頁 【{selected_sheet}】 找不到對應的 SKU 欄位。")
+                        st.warning(f"分頁【{selected_sheet}】找不到 SKU 欄位。")
                     else:
                         df_view[sku_col_candidate] = df_view[sku_col_candidate].astype(str).str.strip().str.split('.').str[0]
-                        sku_paste = st.text_area(f"📋 請貼上多筆【{sku_col_candidate}】（換行、空格或逗號隔開）：", height=120)
+                        sku_paste = st.text_area(f"貼上多筆【{sku_col_candidate}】（換行、空格或逗號分隔）", height=120)
                         
                         if sku_paste.strip():
                             import re
                             cleaned_skus = [t.strip() for t in re.split(r'[\n,\s]+', sku_paste) if t.strip()]
                             if cleaned_skus:
                                 df_result = df_view[df_view[sku_col_candidate].isin(cleaned_skus)].copy()
-                                st.success(f"🔍 查詢完畢！成功比對出 {len(df_result)} 筆商品資料。")
+                                st.success(f"找到 {len(df_result)} 筆。")
                                 st.dataframe(df_result, use_container_width=True)
                                 
                                 towrite_query = io.BytesIO()
                                 with pd.ExcelWriter(towrite_query, engine='openpyxl') as writer:
                                     df_result.to_excel(writer, index=False, sheet_name="SKU查詢結果")
-                                st.download_button("📥 下載本次SKU查詢結果報表 (.xlsx)", data=towrite_query.getvalue(), file_name=f"SKU批次查詢結果_{datetime.date.today().strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                                st.download_button("下載 SKU 查詢結果", data=towrite_query.getvalue(), file_name=f"SKU批次查詢結果_{datetime.date.today().strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
                 elif search_mode == "模糊關鍵字搜尋":
-                    search_term = st.text_input("🔍 快速搜尋關鍵字 (支援條碼、品名、貨號模糊比對)：", placeholder="輸入搜尋內容...")
-                    st.metric(label=f"📊 【{selected_sheet}】當前總資料筆數", value=f"{len(df_view)} 筆")
+                    search_term = st.text_input("關鍵字搜尋", placeholder="條碼、品名、貨號…")
+                    st.metric(label=f"【{selected_sheet}】筆數", value=f"{len(df_view)}")
                     if search_term:
                         search_mask = df_view.astype(str).apply(lambda x: x.str.contains(search_term, case=False, na=False)).any(axis=1)
                         st.dataframe(df_view[search_mask], use_container_width=True)
@@ -248,7 +246,7 @@ def render(sub_page, cfg):
                 st.error(f"❌ 讀取分頁數據失敗: {str(e)}")
 
     elif sub_page == "⚖️ 麗嬰商品表合併和與審核":
-        st.subheader("🧸 麗嬰採購單一鍵導入與審核系統")
+        st.subheader("麗嬰採購單匯入與審核")
         try:
             if not cfg['ID_MASTER_FILE']:
                 st.error("❌ 錯誤：未設定雲端主資料庫 ID (ID_MASTER_FILE)！")
@@ -270,18 +268,18 @@ def render(sub_page, cfg):
 
         if 'merge_success_msg' in st.session_state:
             st.success(st.session_state['merge_success_msg'])
-            st.markdown("### ⚡ 歸檔後後續自動化推薦操作")
-            if st.button("🚀 三表資料整合並自動回寫更新至雲端『商品蝦皮麗嬰價格統整表』", type="primary", use_container_width=True):
+            st.markdown("### 建議下一步")
+            if st.button("寫回雲端統整表", type="primary", use_container_width=True, key="merge_then_pq"):
                 with st.spinner("⏳ 正在回寫雲端..."):
                     if run_powerquery_and_update_gdrive():
-                        st.success("🎯 狂賀！同步覆寫更新完畢！")
+                        st.success("雲端統整表已更新。")
                         del st.session_state['merge_success_msg']   
             st.write("---")
 
-        uploaded_files = st.file_uploader("📥 選擇採購單 Excel (可多選批次上傳)", type=["xlsx", "xls", "xlsm"], accept_multiple_files=True, key="main_merge_files")
+        uploaded_files = st.file_uploader("選擇採購單 Excel（可多選）", type=["xlsx", "xls", "xlsm"], accept_multiple_files=True, key="main_merge_files")
         
         if uploaded_files:
-            if st.button("🚀 開始一鍵合併到麗嬰總表", type="primary"):
+            if st.button("合併到麗嬰總表", type="primary"):
                 success_count = dup_count = no_barcode_count = anomaly_count = 0
                 new_rows, history_records = [], []
                 valid_dfs_to_merge = []
@@ -425,14 +423,14 @@ def render(sub_page, cfg):
                 
                 if save_to_master_xlsm({"麗嬰國際產品總表": df_total, "已處理採購單": df_history, "metadata": df_meta}, cfg['ID_MASTER_FILE'], cfg['ID_BASE_FOLDER'], cfg['NAME_MASTER']):
                     load_master_data.clear()
-                    report_msg = f"🎉 成功完成狀態登記與資料同步！\n\n✅ [已匯入]: {success_count} 份\n🔁 [重複檔案]: {dup_count} 份\n⚠️ [無條碼欄位]: {no_barcode_count} 份"
+                    report_msg = f"已同步。匯入 {success_count} 份；重複 {dup_count} 份；無條碼欄位 {no_barcode_count} 份。"
                     if anomaly_count > 0:
-                        report_msg += f"\n\n🚨 注意：本次匯入發現 **{anomaly_count}** 筆異常衝突商品！"
+                        report_msg += f" 另有 {anomaly_count} 筆異常衝突。"
                     st.session_state['merge_success_msg'] = report_msg
                     st.rerun()
 
         st.write("---")
-        st.subheader("⚠️ 條碼重複與衝突即時審核控制台")
+        st.subheader("條碼重複審核")
         if not df_total.empty:
             if 'move' in df_total.columns: df_total = df_total.drop(columns=['move'])
             df_total.insert(0, 'move', False)
@@ -454,10 +452,10 @@ def render(sub_page, cfg):
                     return row
                 df_anomaly = df_anomaly.apply(inject_emoji_alerts, axis=1)
                 
-                st.warning("下方商品為系統抓出之條碼重複資料：🔴 代表名稱不一致，🟢 代表售價不一致。")
+                st.warning("條碼重複：🔴 名稱不一致，🟢 售價不一致。")
                 edited_anomaly_df = st.data_editor(df_anomaly, use_container_width=True, disabled=[col for col in df_anomaly.columns if col not in ['move', '備註']], key="anomaly_editor")
                 
-                if st.button("🧹 執行審核與資料儲存", type="primary"):
+                if st.button("儲存審核結果", type="primary"):
                     for index, edited_row in edited_anomaly_df.iterrows():
                         target_uid = edited_row['UID']
                         new_note = str(edited_row['備註']).strip().replace("🔴 ", "").replace("🟢 ", "")
@@ -482,19 +480,18 @@ def render(sub_page, cfg):
                         df_remaining_only = run_cross_matching(df_total.drop(columns=['move'], errors='ignore'))
                         if save_to_master_xlsm({"麗嬰國際產品總表": df_remaining_only, "刪除紀錄": df_delete_log}, cfg['ID_MASTER_FILE'], cfg['ID_BASE_FOLDER'], cfg['NAME_MASTER']):
                             load_master_data.clear() 
-                            st.session_state['merge_success_msg'] = "📝 備註內容已同步更新！"
+                            st.session_state['merge_success_msg'] = "備註已更新。"
                             st.rerun()
             else:
-                st.success("🟢 當前總表中沒有任何重複商品的衝突。")
+                st.success("目前沒有條碼重複衝突。")
 
     elif sub_page == "📈 蝦皮商品清單轉換":
-        st.subheader("🛍️ 蝦皮賣場商品列表iSKU結構校正")
+        st.subheader("蝦皮賣場列表 iSKU 校正")
         df_shopee_history, df_shopee_current_list = load_shopee_data(cfg['ID_SHOPEE_MASTER'])
         if "shopee_auto_ran" not in st.session_state:
             st.session_state["shopee_auto_ran"] = False
 
-        st.markdown("#### ☁️ 雲端主表狀態")
-        st.info(f"📅 蝦皮賣場商品列表最後修改：`{format_gdrive_time(cfg.get('TIME_SHOPEE'))}`")
+        st.caption(f"蝦皮賣場商品列表最後修改：`{format_gdrive_time(cfg.get('TIME_SHOPEE'))}`")
         if df_shopee_history is not None and not df_shopee_history.empty:
             last_hist = df_shopee_history.iloc[-1]
             st.caption(f"上次匯入：`{last_hist.get('檔案名稱', '')}` ｜ `{last_hist.get('匯入時間', '')}`")
@@ -507,7 +504,7 @@ def render(sub_page, cfg):
             "mass_update",
         )
         if latest_mass:
-            st.success(f"將處理最新來源檔：`{latest_mass['name']}` ｜ 📅 `{format_gdrive_time(latest_mass.get('modifiedTime'))}`")
+            st.success(f"將處理：`{latest_mass['name']}`｜`{format_gdrive_time(latest_mass.get('modifiedTime'))}`")
         else:
             st.error("❌ 資料夾內找不到 `mass_update_sales_info_3062950_YYYYMMDD*.xlsx`。")
 
@@ -521,22 +518,22 @@ def render(sub_page, cfg):
                 cfg['NAME_SHOPEE'],
             )
             if result["reason"] == "duplicate":
-                st.info(f"⚠️ 來源檔 `{result['name']}` 已校正過（md5 重複），略過覆寫。")
+                st.info(f"來源檔 `{result['name']}` 已校正過（md5 重複），略過覆寫。")
                 return False
             if result["ok"]:
                 load_shopee_data.clear()
                 get_cached_gdrive_id.clear()
                 st.session_state['shopee_clean'] = result["df"]
-                st.success(f"🎉 校正完成！來源 `{result['name']}`，已覆寫雲端（{result['imported_at']}）。")
+                st.success(f"校正完成：`{result['name']}`（{result['imported_at']}）。")
                 return True
             st.error("❌ 校正失敗，無法回寫雲端蝦皮主表。")
             return False
 
-        if st.button("🪄 立即校正（抓取雲端最新 mass_update）", type="primary", use_container_width=True):
+        if st.button("校正雲端最新 mass_update", type="primary", use_container_width=True):
             if not latest_mass:
                 st.error("❌ 沒有可校正的來源檔。")
             else:
-                with st.spinner("正在下載並校正最新蝦皮 mass_update..."):
+                with st.spinner("正在下載並校正…"):
                     try:
                         run_shopee_from_drive(latest_mass)
                     except Exception as e:
@@ -550,17 +547,17 @@ def render(sub_page, cfg):
             and not st.session_state.get("shopee_auto_ran")
         ):
             st.session_state["shopee_auto_ran"] = True
-            with st.spinner("⏰ 今日 10:00 後尚未匯入，自動校正中..."):
+            with st.spinner("今日 10:00 後尚未匯入，自動校正中…"):
                 try:
                     run_shopee_from_drive(latest_mass)
                 except Exception as e:
                     st.error(f"自動校正失敗: {str(e)}")
 
         with st.expander("備用：手動上傳原始報表"):
-            uploaded_shopee = st.file_uploader("📥 上傳新的蝦皮商品清單原始報表：", type=["xlsx", "xls", "xlsm"], key="main_shopee_upload")
+            uploaded_shopee = st.file_uploader("上傳蝦皮商品清單原始報表", type=["xlsx", "xls", "xlsm"], key="main_shopee_upload")
             if uploaded_shopee:
                 file_bytes = uploaded_shopee.read()
-                if st.button("🪄 執行上傳檔 iSKU 結構校正", type="secondary", use_container_width=True):
+                if st.button("校正上傳檔", type="secondary", use_container_width=True):
                     try:
                         result = apply_shopee_isku_from_source(
                             file_bytes,
@@ -570,12 +567,12 @@ def render(sub_page, cfg):
                             cfg['NAME_SHOPEE'],
                         )
                         if result["reason"] == "duplicate":
-                            st.error("⚠️ 拒絕重複格式校正！系統已自動封鎖。")
+                            st.error("此檔已校正過（md5 重複），略過。")
                         elif result["ok"]:
                             load_shopee_data.clear()
                             get_cached_gdrive_id.clear()
                             st.session_state['shopee_clean'] = result["df"]
-                            st.success("🎉 校正完成！已覆寫雲端。")
+                            st.success("校正完成，已覆寫雲端。")
                         else:
                             st.error("❌ 校正失敗，無法回寫雲端。")
                     except Exception as e:
@@ -585,16 +582,16 @@ def render(sub_page, cfg):
             st.dataframe(st.session_state['shopee_clean'], use_container_width=True)
             towrite_shopee = io.BytesIO()
             st.session_state['shopee_clean'].to_excel(towrite_shopee, index=False)
-            st.download_button(label="📥 下載此次iSKU校正蝦皮報表 (.xlsx)", data=towrite_shopee.getvalue(), file_name=f"蝦皮清洗完成對齊表_{datetime.date.today().strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            st.download_button(label="下載校正結果", data=towrite_shopee.getvalue(), file_name=f"蝦皮清洗完成對齊表_{datetime.date.today().strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     elif sub_page == "🔍 商品清單紀錄查詢":
-        st.subheader("📊 歷史商品清單紀錄查詢")
+        st.subheader("歷史商品清單查詢")
         hist_files = list_gdrive_files(cfg['ID_PROD_FOLDER'])
         if not hist_files: 
-            st.warning(f"💡 目前雲端無歷史單據。")
+            st.warning("雲端無歷史單據。")
         else:
             file_options = {f['name']: f['id'] for f in hist_files}
-            selected_hist_file = st.selectbox("🎯 選擇商品清單紀錄檔案：", list(file_options.keys()))
+            selected_hist_file = st.selectbox("選擇商品清單檔案", list(file_options.keys()))
             
             if selected_hist_file:
                 try:
@@ -603,15 +600,15 @@ def render(sub_page, cfg):
                     engine_kw = {"engine": "calamine"} if HAS_CALAMINE else {}
                     df_hist_view = pd.read_excel(io.BytesIO(file_bytes), **engine_kw)
                     
-                    st.markdown(f"📄 **當前雲端檔案**：`{selected_hist_file}` ｜ 📊 **總品項數**：`{len(df_hist_view)} 筆`")
+                    st.caption(f"`{selected_hist_file}`　{len(df_hist_view)} 筆")
                     st.write("---")
                     
-                    st.markdown("#### 🔎 多筆批次編碼查詢")
+                    st.markdown("#### 批次查詢")
                     col_m, col_i = st.columns([1, 3])
                     with col_m:
-                        target_col = st.radio("選擇查詢依據欄位：", options=["自定義編碼", "c"], index=0)
+                        target_col = st.radio("查詢欄位", options=["自定義編碼", "c"], index=0)
                     with col_i:
-                        batch_input = st.text_area(f"請輸入多筆【{target_col}】（每筆請以換行、逗號或空格隔開）：", height=100)
+                        batch_input = st.text_area(f"多筆【{target_col}】（換行、逗號或空格分隔）", height=100)
                     
                     df_display = df_hist_view.copy()
                     if batch_input.strip() and target_col in df_display.columns:
@@ -619,7 +616,7 @@ def render(sub_page, cfg):
                         search_terms = [t.strip() for t in re.split(r'[\n,\s]+', batch_input) if t.strip()]
                         df_display[target_col] = df_display[target_col].astype(str).str.strip().str.split('.').str[0]
                         df_display = df_display[df_display[target_col].isin(search_terms)]
-                        st.info(f"🎯 批次篩選結果：找到 **{len(df_display)}** 筆符合資料。")
+                        st.info(f"找到 {len(df_display)} 筆。")
                     
                     st.dataframe(df_display, use_container_width=True)
                     
@@ -628,7 +625,7 @@ def render(sub_page, cfg):
                         df_display.to_excel(writer, index=False, sheet_name="商品清單查詢結果")
                     
                     st.download_button(
-                        label="🔄 下載此歷史商品清單 (或篩選結果)", 
+                        label="下載結果", 
                         data=towrite_prod.getvalue(), 
                         file_name=selected_hist_file, 
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

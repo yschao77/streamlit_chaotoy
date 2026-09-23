@@ -334,13 +334,7 @@ def _render_preorder_campaign_editor():
     open_rows = campaign.loc[~closed_flags].reset_index(drop=True)
     closed_rows = campaign.loc[closed_flags].reset_index(drop=True)
 
-    st.caption(
-        "SKU 填自定義編碼（與 SiteGiant 庫存 SKU 同一顆）。貨號來自廠商單，不要填進 SKU。"
-        " 「進行中」列可自由編輯；填了實際關閉會立刻移到下方「已關閉」收合區，"
-        "自購／上限／SKU／月份／結單日在那裡直接鎖住不能改（不必送出才還原）。"
-        " 品名、私密連結、賣場後台連結、條碼、貨號兩邊都能改；清空實際關閉即可重開並移回這裡。"
-        " 結單日請用欄位內日期時間挑選器（有 SKU 必填）；日曆事件ID 系統維護請勿手改。"
-    )
+    st.caption("進行中可編輯；填實際關閉會移到下方並鎖定自購／上限／SKU。細節見各欄 help。")
 
     open_for_editor = _campaign_df_for_cutoff_editor(open_rows)
     open_base = _editor_base("preorder_editor_open_base", open_for_editor, replace_empty=True)
@@ -365,10 +359,7 @@ def _render_preorder_campaign_editor():
             st.caption("目前沒有已關閉的活動列。")
             edited_closed = closed_rows
         else:
-            st.caption(
-                "這些列已結單，鎖定欄位直接鎖住不給打字。品名／私密連結／賣場後台連結／條碼／貨號仍可改。"
-                "清空實際關閉會移回上方「進行中」表；如需整列刪除，也請先清空再到上方刪。"
-            )
+            st.caption("已關閉列鎖定欄位不可改；清空實際關閉可移回進行中。")
             closed_for_editor = _campaign_df_for_cutoff_editor(closed_rows)
             closed_base = _editor_base(
                 "preorder_editor_closed_base", closed_for_editor, replace_empty=True
@@ -475,14 +466,14 @@ def _apply_preorder_lock_to_session(result):
 
 def _render_preorder_orders_board(campaign_df):
     st.markdown("### 對客戶訂單")
-    st.caption("摘要看板與 SKU 狀態（唯讀）。本機 Orders 只預覽、不會上傳到 Drive。")
+    st.caption("摘要看板與 SKU 狀態（唯讀）。")
 
     reload_orders = st.button(
         "🔄 重新載入雲端 All Orders",
         use_container_width=True,
         key="preorder_orders_reload",
+        help="只重抓 All Orders 與訂單看板；不影響建檔未存檔編輯、廠商檔快取或結單預覽。",
     )
-    st.caption("只重抓 All Orders 與訂單看板；不影響「建檔／補資料」尚未存檔的編輯，也不會清掉廠商檔快取或結單預覽。")
     if reload_orders:
         get_cached_gdrive_file_bytes.clear()
         st.session_state.pop("preorder_orders_loaded", None)
@@ -501,10 +492,10 @@ def _render_preorder_orders_board(campaign_df):
     uploaded = None
     with st.expander("本機上傳 All Orders 預覽（不會寫入 Drive）", expanded=has_local):
         uploaded = st.file_uploader(
-            "本機上傳 All Orders 預覽（不會上傳到 Drive）",
+            "上傳 Orders zip／xlsx",
             type=["xlsx", "xls", "zip"],
             key="preorder_orders_local",
-            help="可上傳 Orders_DD-MM-YYYY-*.zip 或已解開的 xlsx。不會 files.create／update 到雲端。",
+            help="可上傳 Orders_DD-MM-YYYY-*.zip 或已解開的 xlsx。僅本機預覽，不會寫入 Drive。",
         )
     if uploaded is not None:
         local_key = (uploaded.name, uploaded.size)
@@ -536,7 +527,7 @@ def _render_preorder_orders_board(campaign_df):
 
     if not loaded_orders.get("ok"):
         st.error(f"❌ 無法載入 All Orders：{loaded_orders.get('reason') or '未知錯誤'}")
-        st.info("可改本機上傳 zip／xlsx 預覽。請確認 service account 對 All Orders 資料夾有檢視權，且檔名是 Orders_DD-MM-YYYY-*.zip（內含 xlsx）。")
+        st.info("可改上方本機上傳預覽，或檢查 All Orders 資料夾權限與檔名。")
         st.session_state["preorder_orders_synced"] = False
         sku_status = ensure_preorder_sku_status_df(st.session_state.get("preorder_sku_status_df"))
         pending = st.session_state.get("preorder_pending_df")
@@ -712,16 +703,12 @@ def _render_preorder_sku_overview_and_detail(board, sku_status, pending, campaig
                 edited_overview = _render_preorder_sku_overview_editor(filtered)
                 sku_status = apply_sku_overview_status_edits(sku_status, edited_overview)
                 st.session_state["preorder_sku_status_df"] = sku_status
-                st.caption("改「狀態」後還沒寫回雲端，按下面「覆寫雲端預購追蹤」才會存檔。")
+                st.caption("改狀態後按下方覆寫雲端才存檔。")
                 _save_preorder_tracker_button(campaign_df, "preorder_save_sku_overview", primary=False)
             else:
                 edited_overview = filtered
                 st.dataframe(filtered, use_container_width=True, hide_index=True)
-            st.caption(
-                "已付款／未付款依付款狀態，只顯示看板口徑；可打單另要求訂單狀態＝待處理。"
-                "「狀態」欄在此唯讀——要標到貨請到「到貨催款」。"
-                "「在活動表」＝否表示這個 SKU 還沒建活動列，數字欄留空。"
-            )
+                st.caption("狀態唯讀；標到貨請到「到貨催款」。")
 
             sku_options = [s for s in edited_overview["SKU"].tolist() if s]
             picked = st.multiselect(
@@ -736,13 +723,10 @@ def _render_preorder_sku_overview_and_detail(board, sku_status, pending, campaig
             elif picked:
                 st.info("目前沒有訂單資料可顯示明細（All Orders 還沒載入）。")
             else:
-                st.caption("在上面選取 SKU 才會顯示逐筆明細，避免 SKU 一多整頁被撐長。")
+                st.caption("選取 SKU 後顯示明細。")
 
     with tab_raw:
-        st.caption(
-            "最新 All Orders 快照，含所有預購訂單列（不分活動/SKU 是否對得上）。"
-            "已過天數只算未付款、未取消、未退款。除錯／稽核用，跟上面看板數字口徑可能不完全一樣。"
-        )
+        st.caption("All Orders 預購列快照（稽核用，口徑可能與看板不同）。")
         pending_n = 0 if pending is None or getattr(pending, "empty", True) else len(pending)
         dated_n = 0
         if pending is not None and not getattr(pending, "empty", True) and "首次通知日" in pending.columns:
@@ -765,11 +749,7 @@ def _render_preorder_sku_overview_and_detail(board, sku_status, pending, campaig
 def _render_preorder_arrival_status_editor(campaign_df, orders_df, sku_status_df):
     """「到貨催款」開頭：唯一可改「預購／到貨」的地方。"""
     st.markdown("**標到貨**")
-    st.caption(
-        "這裡是唯一可改「預購／到貨」的地方。優先處理「已結單待到貨」；"
-        "改成到貨後，下方催款／可打單會立刻依目前畫面重算。"
-        " 改完按「覆寫雲端預購追蹤」才寫回雲端（與「建檔／補資料」同一份檔）。"
-    )
+    st.caption("改「預購／到貨」後按覆寫雲端；下方催款／可打單會依畫面重算。")
     sku_status = ensure_preorder_sku_status_df(sku_status_df)
     missing = arrived_skus_missing_from_campaign(sku_status, campaign_df)
     if missing:
@@ -797,10 +777,7 @@ def _render_preorder_arrival_status_editor(campaign_df, orders_df, sku_status_df
         if "階段" in pending_arrival.columns and not pending_arrival.empty
         else 0
     )
-    st.caption(
-        f"只列尚未標到貨（狀態＝預購）且已接單＞0。其中「已結單待到貨」{awaiting_n} 列。"
-        " 客戶量為 0 或尚未對到訂單的 SKU 不列出。"
-    )
+    st.caption(f"待標到貨 {len(pending_arrival)} 列（已結單待到貨 {awaiting_n}）。")
     if pending_arrival.empty:
         if orders_df is None:
             st.info("請先到「對訂單」載入 All Orders，才會列出有客戶量的待標到貨 SKU。")
@@ -850,13 +827,7 @@ def _stamp_and_persist_notify(campaign_df, keys):
 
 def _render_preorder_arrival_copy(campaign_df, orders_df, sku_status_df):
     st.markdown("### 到貨催款")
-    st.caption(
-        "先在本頁「標到貨」改狀態；催款／可打單只含已標到貨的 SKU。"
-        " 催款文＝未付款且非已取消／已退款。"
-        " 可打單＝已付款且訂單狀態＝待處理。"
-        " 按「本次催款已通知且覆寫雲端預購追蹤」會立刻寫入首次通知日，並覆寫雲端整份預購追蹤（含通知紀錄／預購訂單）。"
-        " 打單、取消、勾已收到付款仍在 SiteGiant。"
-    )
+    st.caption("先標到貨再催款／打單；打單與取消仍在 SiteGiant。規則見上方摺疊。")
     sku_status_df = _render_preorder_arrival_status_editor(
         campaign_df, orders_df, sku_status_df
     )
@@ -891,10 +862,7 @@ def _render_preorder_arrival_copy(campaign_df, orders_df, sku_status_df):
             unpaid_lines_df, st.session_state.get("preorder_notify_df")
         )
         with st.expander(f"逐筆選要通知的未付款訂單（{len(unpaid_view)} 列）"):
-            st.caption(
-                "已有首次通知日的列預設不勾，避免重複通知；整批蓋章也不會改既有日期。"
-                " 全選可刻意全勾（重點名仍不覆寫日期）。"
-            )
+            st.caption("已有首次通知日的列預設不勾；全選可刻意全勾（不覆寫既有日期）。")
             display_cols = [
                 c
                 for c in [
@@ -968,25 +936,18 @@ def _render_preorder_arrival_copy(campaign_df, orders_df, sku_status_df):
     if notify is not None and not getattr(notify, "empty", True):
         st.markdown("**通知紀錄**")
         notify_view = build_preorder_notify_display(notify, orders_df)
-        st.caption(
-            "只列仍未付款（已付款／已退款／已取消不顯示）。"
-            "已過天數供判斷是否取消；本頁不取消。工作表仍保留全部通知列。"
-        )
+        st.caption("只列仍未付款；已過天數供判斷是否去 SiteGiant 取消（本頁不取消）。")
         if notify_view is None or getattr(notify_view, "empty", True):
             st.info("目前沒有仍未付款的通知紀錄（可能都已付款，或尚未蓋章）。")
         else:
             st.dataframe(notify_view, use_container_width=True, hide_index=True)
     else:
-        st.caption("已過天數給你決定要不要去 SiteGiant 取消訂單；本頁不取消。")
+        st.caption("尚無通知紀錄。")
 
 
 def _render_preorder_vendor_import(campaign_df):
     st.markdown("### 從廠商單帶入")
-    st.caption(
-        "勾選要跟的款再寫入。只帶入廠商檔名、貨號、品名、條碼；不會填庫存 SKU。"
-        " 沒條碼只要勾選也會匯入。已有列的 SKU、自購、上限會保留。"
-        " 已填實際關閉的列不會被這次匯入覆寫。"
-    )
+    st.caption("勾選要跟的款再寫入；不填庫存 SKU，已關閉列不會覆寫。")
     uploaded = st.file_uploader(
         "上傳廠商原始訂購單（xlsx／xls）",
         type=["xlsx", "xls"],
@@ -1015,10 +976,7 @@ def _render_preorder_vendor_import(campaign_df):
         return campaign_df
 
     preview = parsed.get("preview")
-    st.caption(
-        f"檔名：`{uploaded.name}`　可勾選 {len(preview)} 列。"
-        " 預設不全選，避免整份廠商目錄誤匯入（麗嬰型可能上百列）；請只勾要跟的款，或用下面全選/取消全選輔助。"
-    )
+    st.caption(f"`{uploaded.name}`：可勾選 {len(preview)} 列（預設不全選）。")
     sel_col1, sel_col2 = st.columns(2)
     with sel_col1:
         if st.button("全選", key="preorder_vendor_select_all", use_container_width=True):
@@ -1130,14 +1088,7 @@ def _lock_select_index_set(df):
 def _render_preorder_close(campaign_df, orders_df):
     campaign_df = st.session_state.get("preorder_campaign_df", campaign_df)
     st.markdown("### 結單下載")
-    st.caption(
-        "勾選要結單的列再預覽。鎖定數量 = 自購 + min(客戶量, 上限)。上限空＝不封頂；自購空＝0。"
-        " 未填 SKU、已實際關閉的列不會出現在勾選表。"
-        " 自購可在這張表改；按「預覽鎖定數量」才寫入活動表（尚未覆寫雲端）。"
-        " 勾選表上的鎖定數量以預覽為準。"
-        " SiteGiant 採購單只給本機下載，不會覆寫雲端空殼。"
-        " 同場再確認鎖定，會取代本次尚未存檔的廠商單歷史。"
-    )
+    st.caption("勾選後按預覽鎖定數量；自購改完也要先預覽。公式見上方計算規則。")
     dups = duplicate_preorder_skus(campaign_df)
     if dups:
         st.warning("同一 SKU 出現在多列，客戶量會重複加總：" + "、".join(f"`{s}`" for s in dups))
@@ -1158,7 +1109,7 @@ def _render_preorder_close(campaign_df, orders_df):
     if candidates.empty:
         st.info("沒有可結單的列（需要已填 SKU、且尚未實際關閉）。")
     else:
-        st.caption(f"可結單 {len(candidates)} 列。取消勾選的列這次不鎖定。自購改完請按預覽才寫入活動表。")
+        st.caption(f"可結單 {len(candidates)} 列。")
         sel_col1, sel_col2 = st.columns(2)
         with sel_col1:
             if st.button("全選", key="preorder_lock_select_all", use_container_width=True):
@@ -1195,7 +1146,7 @@ def _render_preorder_close(campaign_df, orders_df):
         if not lock_result:
             st.caption(f"目前勾選 {len(selected_indices)} 列。")
         if _lock_self_buy_dirty(edited_candidates, campaign_df):
-            st.warning("自購已改、尚未套用到活動表。請按預覽鎖定數量；不要先到「建檔／補資料」覆寫雲端。")
+            st.warning("自購已改，請先按預覽鎖定數量再覆寫雲端。")
 
     if st.button("預覽鎖定數量", use_container_width=True, key="preorder_lock_preview_btn"):
         if not selected_indices:
@@ -1422,11 +1373,12 @@ def _ensure_preorder_loaded():
 
 def _render_shared_shell():
     """各子頁共用：重載、雲端狀態、計算規則／空殼摺疊。"""
-    st.caption("從廠商單帶入款項、補 SKU 後對訂單、結單下載兩檔；到貨後再催款。寫回只覆寫既有雲端檔。")
-    reload = st.button("重新載入預購追蹤", use_container_width=True, key="preorder_reload")
-    st.caption(
-        "重抓雲端活動表，並清空本模組所有未存檔的編輯（廠商檔快取、結單預覽、All Orders 快取等）。"
-        " 只想重抓訂單看板請到「對訂單」子頁按『重新載入雲端 All Orders』。"
+    st.caption("廠商帶入 → 補 SKU → 對訂單 → 結單 → 到貨催款。")
+    reload = st.button(
+        "重新載入預購追蹤",
+        use_container_width=True,
+        key="preorder_reload",
+        help="重抓雲端活動表並清空本模組未存檔編輯。只想重抓訂單請到「對訂單」按重新載入 All Orders。",
     )
     if reload:
         _reload_preorder_tracker()
@@ -1435,11 +1387,11 @@ def _render_shared_shell():
     loaded = _ensure_preorder_loaded()
     if not loaded.get("ok"):
         st.error(f"❌ 無法載入預購追蹤：{loaded.get('reason') or '未知錯誤'}")
-        st.info("請確認 service account 對該檔有編輯權，且檔案是 .xlsx。")
+        st.info("請確認該檔有編輯權，且為 .xlsx。")
         return None
 
     if st.session_state.pop("preorder_save_ok", False):
-        st.success("已覆寫雲端預購追蹤.xlsx（未新建檔、未改 SiteGiant 採購單空殼）。")
+        st.success("已覆寫雲端預購追蹤.xlsx。")
     import_msg = st.session_state.pop("preorder_vendor_import_msg", None)
     if import_msg:
         st.success(import_msg)
@@ -1459,14 +1411,14 @@ def _render_shared_shell():
         restock = probe_sg_restock_template()
         if restock.get("ok"):
             st.download_button(
-                label=f"📥 下載 SiteGiant 採購單空殼（`{restock.get('name') or 'import_restock.xlsx'}`，只讀）",
+                label=f"下載採購單空殼（`{restock.get('name') or 'import_restock.xlsx'}`）",
                 data=restock.get("bytes") or b"",
                 file_name=restock.get("name") or "import_restock.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
                 key="preorder_restock_template_dl",
+                help="只供本機參考；結單區另產已填檔，不會覆寫雲端空殼。",
             )
-            st.caption("空殼只供本機參考／結單區另產已填檔；不會覆寫雲端空殼。")
         else:
             st.caption(f"無法讀取採購單空殼：{restock.get('reason') or '未知錯誤'}")
 
@@ -1517,7 +1469,6 @@ def _render_overview(campaign_df):
 def render(sub_page):
     """預購追蹤第四主模組：依側邊欄子頁渲染。"""
     st.title(f"{sub_page}")
-    st.info(f"目前導覽路徑： 🗓️ 預購追蹤 ➔ {sub_page}")
     st.write("---")
 
     campaign = _render_shared_shell()

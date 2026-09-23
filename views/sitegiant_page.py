@@ -123,7 +123,7 @@ def _show_hist_fix_results(results, key_prefix):
         if item.get("bytes"):
             dl_name = _xlsx_filename(name)
             st.download_button(
-                label=f"📥 下載更正後檔案：{dl_name}",
+                label=f"下載更正後：{dl_name}",
                 data=item["bytes"],
                 file_name=dl_name,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -143,45 +143,41 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
     """
     
     st.title(f"{sub_page}")
-    st.info(f"目前導覽路徑： 🌐 Sitegiant 電商整合管理 ➔ {sub_page}")
     st.write("---")
 
     # -------------------------------------------------------------------------
     # 子功能 1：🔀 sitegiant 採購入庫單格式轉換
     # -------------------------------------------------------------------------
     if sub_page == "🔀 Sitegiant 採購入庫單格式轉換":
-        st.subheader("🛍️ Sitegiant 採購入庫單內容填寫")
+        st.subheader("採購入庫單")
         
         # ── 1. 基本設定與資料輸入 ──
         c_meta1, c_meta2 = st.columns(2)
         with c_meta1: 
-            order_no = st.text_input("📝 請輸入訂單/銷貨單號：", value=datetime.date.today().strftime("%Y%m%d01"))
+            order_no = st.text_input("訂單／銷貨單號", value=datetime.date.today().strftime("%Y%m%d01"))
             vendor_options = ["麗嬰", "Buyee", "日亞", "其他"]
-            selected_vendor = st.selectbox("🏬 請選擇採購廠商：", vendor_options, key="sg_vendor_selectbox")
+            selected_vendor = st.selectbox("採購廠商", vendor_options, key="sg_vendor_selectbox")
             
             if selected_vendor == "其他":
-                custom_vendor = st.text_input("✍️ 請輸入自訂廠商名稱：", key="sg_custom_vendor_name")
+                custom_vendor = st.text_input("自訂廠商名稱", key="sg_custom_vendor_name")
                 vendor_name = custom_vendor if custom_vendor.strip() else "其他廠商"
             else:
                 vendor_name = selected_vendor
 
         with c_meta2:
-            recv_date = st.date_input("📅 選擇銷貨日期：", value=datetime.date.today())
+            recv_date = st.date_input("銷貨日期", value=datetime.date.today())
             recv_date = recv_date.strftime("%y%m%d")
             
         st.write("---")
 
-        # ── 2. 剪貼簿快速文字貼上區 ──
-        st.markdown("### 1️⃣ 第一步：貼上原始資料")
-        st.info("💡 請直接從 Excel 複製『國際條碼』與『數量』這兩欄資料，並貼入下方文字框中。")
-        
+        st.markdown("### 貼上原始資料")
         pasted_text = st.text_area(
-            "📋 剪貼簿貼上區：", 
-            height=150, 
-            placeholder="請在此貼上...\n範例格式：\n4711234567890\t2\n4711234567891\t5"
+            "從 Excel 貼上國際條碼與數量",
+            height=150,
+            placeholder="4711234567890\t2\n4711234567891\t5",
         )
         
-        if st.button("📥 解析並產生預覽表格", type="secondary", use_container_width=True):
+        if st.button("解析並產生預覽", type="secondary", use_container_width=True):
             if pasted_text.strip():
                 try:
                     df_parsed = pd.read_csv(io.StringIO(pasted_text.strip()), sep=r'\s+|\t', engine='python', header=None, dtype=str)
@@ -210,8 +206,7 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
 
         st.write("---")
 
-        # ── 3. 動態預覽與編輯區 ──
-        st.markdown("### 2️⃣ 第二步：檢查與微調明細")
+        st.markdown("### 檢查與微調明細")
         if 'inward_input_df' not in st.session_state:
             st.session_state['inward_input_df'] = pd.DataFrame(columns=["國際條碼", "數量"])
 
@@ -225,9 +220,8 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
 
         st.write("---") 
         
-        # ── 4. 核心執行按鈕 ──
-        st.markdown("### 3️⃣ 第三步：執行格式轉換")
-        if st.button("✨ 執行貨品名稱和成本稅款導入並紀錄待處理商品", type="primary", use_container_width=True):
+        st.markdown("### 執行格式轉換")
+        if st.button("轉換並預覽", type="primary", use_container_width=True):
             if not order_no.strip() or input_df.empty: 
                 st.error("❌ 轉換失敗！請填入銷貨單號，並確認上方表格有有效明細。")
             else:
@@ -413,7 +407,7 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
             available_cols = [col for col in target_columns if col in res_df.columns]
             df_download = res_df[available_cols].copy()
             
-            st.markdown(f"### 📋 【{current_vendor}】入庫明細結果預覽")
+            st.markdown(f"### 【{current_vendor}】入庫預覽")
             
             edited_inward_df = st.data_editor(
                 df_download,
@@ -438,12 +432,12 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
                     try: h_tax += float(h_row.稅款) * h_qty
                     except: pass
             
-            st.markdown("#### 📊 本張單據入庫成本稅款即時統計看板")
+            st.markdown("#### 成本／稅款合計")
             c_tot1, c_tot2 = st.columns(2)
             with c_tot1: 
-                st.metric(label="💰 當前單據成本未稅總金額 (成本 * 數量)", value=f"$ {h_cost:,.2f} 元")
+                st.metric(label="成本未稅（成本 × 數量）", value=f"$ {h_cost:,.2f}")
             with c_tot2: 
-                st.metric(label="🧾 當前單據營業稅總金額 (稅款 * 數量)", value=f"$ {h_tax:,.2f} 元")
+                st.metric(label="營業稅（稅款 × 數量）", value=f"$ {h_tax:,.2f}")
             
             st.write("---")
             
@@ -458,7 +452,7 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
                 final_filename = f"sitegiant採購入庫單_{recv_date}_{current_vendor}_{current_order}{pending_suffix}.xlsx"
 
                 st.download_button(
-                    label=f"📥 儲存並下載 Sitegiant 格式入庫單",
+                    label="下載入庫單",
                     data=towrite_inward.getvalue(),
                     file_name=final_filename,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -467,7 +461,7 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
                 )
                 
             with col_reset:
-                if st.button("🔄 完成下載，清除畫面處理下一筆", type="secondary", use_container_width=True):
+                if st.button("清除畫面，下一筆", type="secondary", use_container_width=True):
                     if 'inward_result_df' in st.session_state:
                         del st.session_state['inward_result_df']
                     st.session_state['inward_input_df'] = pd.DataFrame(columns=["國際條碼", "數量"])
@@ -482,23 +476,25 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
         hist_files = list_history_inward_files(ID_HISTORY_INWARD_FOLDER)
         hist_options = history_inward_option_map(hist_files)
 
-        st.subheader("📥 批次匯入歷史入庫單")
-        st.caption(
-            "以「國際條碼」對統整表欄位 `c`，將 `sitegiant庫存SKU` 寫入「庫存貨品名稱」。"
-            "入庫單在 `YYYY/YYMM` 子資料夾；雲端已有同名檔才覆寫（跨月同名時對檔名日期所在月份）。"
-            "沒有同名檔只提供本機下載，不新建。"
-        )
+        st.subheader("批次匯入歷史入庫單")
+        st.caption("上傳入庫單，依統整表填入庫存貨品名稱。")
+        with st.expander("寫入規則", expanded=False):
+            st.markdown(
+                "- 以「國際條碼」對統整表欄位 `c`，寫入 `sitegiant庫存SKU` 到「庫存貨品名稱」。\n"
+                "- 入庫單在 `YYYY/YYMM` 子資料夾；雲端已有同名檔才覆寫。\n"
+                "- 沒有同名檔只提供本機下載，不新建。"
+            )
         uploaded_hist_files = st.file_uploader(
-            "📥 選擇歷史入庫單 Excel（可多選）",
+            "選擇歷史入庫單 Excel（可多選）",
             type=["xlsx", "xls"],
             accept_multiple_files=True,
             key="hist_inward_import_files",
         )
-        if st.button("✨ 依統整表更新庫存貨品名稱並匯入", type="primary", use_container_width=True, key="hist_inward_import_btn"):
+        if st.button("依統整表更新並匯入", type="primary", use_container_width=True, key="hist_inward_import_btn"):
             if not uploaded_hist_files:
                 st.error("❌ 請先選擇要匯入的入庫單檔案。")
             else:
-                with st.spinner("⏳ 正在對照統整表並處理匯入檔案..."):
+                with st.spinner("正在對照統整表並處理匯入檔案…"):
                     try:
                         name_map, empty_sku_barcodes = load_barcode_to_sitegiant_name_map(summary_file_id)
                         results = []
@@ -545,22 +541,22 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
             _show_hist_fix_results(st.session_state["hist_import_results"], "hist_import")
 
         st.write("---")
-        st.subheader("🔄 批次修正雲端既有單據")
+        st.subheader("批次修正雲端單據")
         if not hist_files:
-            st.warning("💡 目前雲端無歷史單據可修正。")
+            st.warning("目前雲端無歷史單據可修正。")
         else:
             hist_labels = list(hist_options.keys())
             selected_fix_files = st.multiselect(
-                "選擇要修正的歷史入庫單：",
+                "選擇要修正的歷史入庫單",
                 hist_labels,
                 default=hist_labels,
                 key="hist_inward_fix_select",
             )
-            if st.button("✨ 依統整表更新所選單據的庫存貨品名稱", type="primary", use_container_width=True, key="hist_inward_fix_btn"):
+            if st.button("依統整表更新所選單據", type="primary", use_container_width=True, key="hist_inward_fix_btn"):
                 if not selected_fix_files:
                     st.error("❌ 請至少選擇一張歷史入庫單。")
                 else:
-                    with st.spinner("⏳ 正在對照統整表並覆寫雲端單據..."):
+                    with st.spinner("正在對照統整表並覆寫雲端單據…"):
                         try:
                             name_map, empty_sku_barcodes = load_barcode_to_sitegiant_name_map(summary_file_id)
                             results = []
@@ -606,21 +602,18 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
                 _show_hist_fix_results(st.session_state["hist_fix_results"], "hist_fix")
 
         st.write("---")
-        st.subheader("📊 歷史入庫單與成本稅款加總指標檢視")
+        st.subheader("歷史入庫單檢視")
         if not hist_files:
-            st.warning("💡 目前雲端無歷史單據。")
+            st.warning("目前雲端無歷史單據。")
         else:
-            selected_hist_label = st.selectbox("🎯 選擇欲調閱的入庫對帳單：", list(hist_options.keys()))
+            selected_hist_label = st.selectbox("選擇入庫單", list(hist_options.keys()))
             if selected_hist_label:
                 try:
                     selected_meta = hist_options[selected_hist_label]
                     target_id = selected_meta["id"]
                     file_bytes = download_gdrive_file_to_bytes(target_id)
                     df_hist_view = pd.read_excel(file_bytes, engine="calamine" if HAS_CALAMINE else None)
-                    st.markdown(
-                        f"📄 **當前雲端檔案**：`{selected_hist_label}` ｜ "
-                        f"📊 **單據品項數**：`{len(df_hist_view)} 筆`"
-                    )
+                    st.caption(f"`{selected_hist_label}`　{len(df_hist_view)} 筆")
                     st.dataframe(df_hist_view, use_container_width=True)
                     
                     h_cost = 0.0
@@ -634,15 +627,15 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
                             try: h_tax += float(h_row.稅款) * h_qty
                             except ValueError: pass
                         
-                    st.markdown("#### 📊 本張單據入庫成本稅款")
+                    st.markdown("#### 成本／稅款合計")
                     c_tot1, c_tot2 = st.columns(2)
                     with c_tot1: 
-                        st.metric(label="💰 成本未稅總金額 (成本 * 數量)", value=f"$ {h_cost:,.2f} 元")
+                        st.metric(label="成本未稅（成本 × 數量）", value=f"$ {h_cost:,.2f}")
                     with c_tot2: 
-                        st.metric(label="🧾 營業稅總金額 (稅款 * 數量)", value=f"$ {h_tax:,.2f} 元")    
+                        st.metric(label="營業稅（稅款 × 數量）", value=f"$ {h_tax:,.2f}")    
                     
                     st.download_button(
-                        label="🔄 下載此歷史採購入庫單",
+                        label="下載此入庫單",
                         data=file_bytes.getvalue(),
                         file_name=selected_meta["name"],
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -653,18 +646,15 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
     # 子功能 2b：🔍 查詢入庫紀錄
     # -------------------------------------------------------------------------
     elif sub_page == "🔍 查詢入庫紀錄":
-        st.subheader("🔍 查詢商品來自哪筆歷史入庫單")
-        st.caption(
-            "掃描歷史入庫根目錄與 `YYYY/YYMM` 子資料夾。"
-            f"查詢先讀根目錄 `{HISTORY_INWARD_INDEX_NAME}`；來源清單有增刪改才重掃並覆寫索引。"
-        )
-        if st.button("🔄 重新載入索引", key="inward_query_reload"):
+        st.subheader("查詢歷史入庫單")
+        st.caption("依條碼查歷史入庫單；索引有增刪改才重掃。")
+        if st.button("重新載入索引", key="inward_query_reload"):
             st.session_state.pop("inward_index_result", None)
-            with st.spinner("⏳ 正在重新載入入庫紀錄索引..."):
+            with st.spinner("正在重新載入入庫紀錄索引…"):
                 st.session_state["inward_index_result"] = refresh_history_inward_index(ID_HISTORY_INWARD_FOLDER)
             st.rerun()
         if "inward_index_result" not in st.session_state:
-            with st.spinner("⏳ 正在載入入庫紀錄索引..."):
+            with st.spinner("正在載入入庫紀錄索引…"):
                 st.session_state["inward_index_result"] = load_history_inward_index(ID_HISTORY_INWARD_FOLDER)
         index_result = st.session_state["inward_index_result"]
         df_index = index_result.get("df")
@@ -694,13 +684,13 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
             st.metric("索引明細列數", f"{len(df_index)}")
 
         st.write("---")
-        st.markdown("#### 🔎 多筆批次查詢")
+        st.markdown("#### 批次查詢")
         col_m, col_i = st.columns([1, 3])
         with col_m:
-            target_col = st.radio("選擇查詢依據欄位：", options=["國際條碼", "庫存SKU"], index=0)
+            target_col = st.radio("查詢欄位", options=["國際條碼", "庫存SKU"], index=0)
         with col_i:
             batch_input = st.text_area(
-                f"請輸入多筆【{target_col}】（每筆請以換行、逗號或空格隔開）：",
+                f"多筆【{target_col}】（換行、逗號或空格分隔）",
                 height=100,
             )
 
@@ -723,7 +713,7 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
                     df_display = df_display[sku_series.isin(cleaned_terms)]
                     found = set(sku_series[sku_series.isin(cleaned_terms)].tolist())
                     missing_terms = [t for t in cleaned_terms if t not in found]
-            st.info(f"🎯 批次篩選結果：找到 **{len(df_display)}** 筆符合資料。")
+            st.info(f"找到 {len(df_display)} 筆。")
             if missing_terms:
                 st.warning("查無資料：" + "、".join(missing_terms))
 
@@ -749,7 +739,7 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
         with pd.ExcelWriter(towrite_query, engine="openpyxl") as writer:
             df_display.to_excel(writer, index=False, sheet_name="入庫查詢結果")
         st.download_button(
-            label="📥 下載本次查詢結果 (.xlsx)",
+            label="下載查詢結果",
             data=towrite_query.getvalue(),
             file_name=f"入庫紀錄查詢_{datetime.date.today().strftime('%Y%m%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -759,26 +749,20 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
     # 子功能 3：📦 SiteGiant 批量新增UPC
     # -------------------------------------------------------------------------
     elif sub_page == "📦 Sitegiant 批量新增UPC":
-        st.subheader("📦 Sitegiant 批量新增UPC")
+        st.subheader("批量新增 UPC")
         
-        with st.expander("📌 點擊查看操作流程與前/後置條件", expanded=True):
-            st.markdown("""
-            ### 📝 前置條件
-            1. **確認 iSKU 對應 UPC**。
-            2. **將 Sitegiant 批量編輯 UPC 檔放到雲端 `Sitegiant_UPC` 資料夾**（xlsx 或 zip 皆可）：
-               - 檔名格式：`batch_edit_item_upc_assignment_all_DD-MM-YYYY-*.xlsx`
-            3. **確認蝦皮賣場列表已校正**。
-            ### 🚀 後續操作
-            - 將下方處理完畢的 Excel 上傳回 Sitegiant 覆蓋即可。定時同步也會把結果寫成雲端 `batch_edit_upc_added_only.xlsx`。
-            """)
+        with st.expander("操作流程", expanded=False):
+            st.markdown(
+                "1. 確認 iSKU 對應 UPC，蝦皮賣場列表已校正。\n"
+                "2. 將 `batch_edit_item_upc_assignment_all_DD-MM-YYYY-*.xlsx`（或 zip）放到雲端 `Sitegiant_UPC`。\n"
+                "3. 按下方填補後，把結果上傳回 Sitegiant。"
+            )
 
         df_shopee_hist, df_shopee_list = load_shopee_data(ID_SHOPEE_MASTER)
 
         if df_shopee_list.empty:
             st.error("❌ 無法從雲端讀取蝦皮商品列表！請先前往「蝦皮商品清單轉換」執行校正並回寫雲端。")
         else:
-            st.info("✅ 系統已自動從雲端載入最新的蝦皮商品列表，準備好進行 UPC 交叉比對！")
-
             latest_upc = None
             if ID_SITEGIANT_UPC_FOLDER:
                 latest_upc = pick_latest_gdrive_file(
@@ -791,7 +775,9 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
                 st.success(
                     f"將處理最新來源檔：`{latest_upc['name']}` ｜ 📅 `{format_gdrive_time(latest_upc.get('modifiedTime'))}`"
                 )
-                st.caption("寫回 `batch_edit_upc_added_only.xlsx`：請先在資料夾手動建立此檔，service account 只能覆寫、不能新建。")
+                st.caption(
+                    "寫回 `batch_edit_upc_added_only.xlsx`（須先手動建立；僅能覆寫、不能新建）。"
+                )
             else:
                 st.error("❌ 資料夾內找不到 `batch_edit_item_upc_assignment_all_DD-MM-YYYY-*.xlsx/.zip`。")
 
@@ -800,7 +786,7 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
                 filled, stats = fill_sitegiant_upc(df_sg, df_shopee_list)
                 st.session_state["sg_upc_updated_df"] = filled
                 if stats["updated"] > 0:
-                    st.success(f"🎉 處理完成！共成功自動填補 **{stats['updated']}** 筆缺失的 UPC 資料。")
+                    st.success(f"已填補 {stats['updated']} 筆 UPC。")
                     if write_drive and ID_SITEGIANT_UPC_FOLDER:
                         existing = resolve_named_file(ID_SITEGIANT_UPC_FOLDER, "batch_edit_upc_added_only")
                         towrite_sg = io.BytesIO()
@@ -813,15 +799,15 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
                             existing_file_id=existing["id"] if existing else None,
                             allow_create=False,
                         )
-                        st.info(f"☁️ 已寫回雲端 `{UPC_FILLED_FILENAME}`，請再上傳至 Sitegiant。")
+                        st.info(f"已寫回雲端 `{UPC_FILLED_FILENAME}`，請再上傳至 Sitegiant。")
                 else:
-                    st.warning("⚠️ 處理完成，但未找到任何可填補的缺失 UPC 資料。")
+                    st.warning("沒有可填補的缺失 UPC。")
 
-            if st.button("⚡ 從雲端最新 UPC 檔填補", type="primary", use_container_width=True):
+            if st.button("從雲端最新 UPC 檔填補", type="primary", use_container_width=True):
                 if not latest_upc:
                     st.error("❌ 沒有可處理的來源檔。")
                 else:
-                    with st.spinner("⏳ 正在下載雲端檔並填入缺失的 UPC..."):
+                    with st.spinner("正在下載並填入缺失 UPC…"):
                         try:
                             payload, inner_name = download_source_spreadsheet(
                                 latest_upc, "batch_edit_item_upc_assignment_all"
@@ -832,11 +818,11 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
 
             with st.expander("備用：手動上傳 UPC 檔"):
                 uploaded_sg_file = st.file_uploader(
-                    "📥 請上傳 Sitegiant UPC 批量編輯下載檔 (.xlsx/.xls/.csv/.zip)",
+                    "上傳 Sitegiant UPC 批量編輯檔",
                     type=["xlsx", "xls", "csv", "zip"],
                 )
-                if uploaded_sg_file and st.button("⚡ 執行上傳檔自動比對並填補 UPC", type="secondary", use_container_width=True):
-                    with st.spinner("⏳ 正在自動比對蝦皮資料庫並填入缺失的 UPC..."):
+                if uploaded_sg_file and st.button("比對並填補 UPC", type="secondary", use_container_width=True):
+                    with st.spinner("正在比對並填入缺失 UPC…"):
                         try:
                             raw = uploaded_sg_file.read()
                             name = uploaded_sg_file.name
@@ -848,7 +834,7 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
 
             if "sg_upc_updated_df" in st.session_state and not st.session_state["sg_upc_updated_df"].empty:
                 df_result = st.session_state["sg_upc_updated_df"]
-                st.markdown(f"### 📋 成功新增 UPC 預覽（共 {len(df_result)} 筆）")
+                st.markdown(f"### UPC 預覽（{len(df_result)} 筆）")
                 st.dataframe(df_result, use_container_width=True)
                 
                 towrite_sg = io.BytesIO()
@@ -858,7 +844,7 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
                 download_filename = f"batch_edit_upc_added_only_{datetime.date.today().strftime('%Y%m%d')}.xlsx"
                 
                 st.download_button(
-                    label=f"📥 下載包含 {len(df_result)} 筆成功自動填補的 Sitegiant 檔案",
+                    label=f"下載已填補檔（{len(df_result)} 筆）",
                     data=towrite_sg.getvalue(),
                     file_name=download_filename,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -870,10 +856,10 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
     # 子功能 4：📋 採購單待處理
     # -------------------------------------------------------------------------
     elif sub_page == "📋 採購單待處理":
-        st.subheader("📋 採購單待處理 (尚未建立商品清單)")
+        st.subheader("採購單待處理")
         TARGET_SHEET_ID = "1Ixp9V_u2yU8hiWhxQCHNDB4kPKlxDGD2"
         
-        with st.spinner("⏳ 正在由雲端獲取待處理清單..."):
+        with st.spinner("正在載入待處理清單…"):
             try:
                 file_bytes = get_cached_gdrive_file_bytes(TARGET_SHEET_ID)
                 engine_kw = {"engine": "calamine"} if HAS_CALAMINE else {}
@@ -882,10 +868,9 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
                 df_pending.columns = df_pending.columns.astype(str).str.strip()
                 
                 if df_pending.empty:
-                    st.success("🎉 太棒了！目前沒有任何待處理的異常商品與採購單。")
+                    st.success("目前沒有待處理項目。")
                 else:
-                    st.markdown(f"📊 **目前待處理總筆數**：`{len(df_pending)} 筆`")
-                    st.info("💡 下方為過去轉換入庫單時，找不到雲端統整表對應紀錄的異常商品，請調閱並盡速前往建立或更新資料。")
+                    st.markdown(f"**待處理**：`{len(df_pending)}` 筆（入庫轉換時統整表找不到對應）")
                     
                     st.dataframe(df_pending, use_container_width=True)
                     
@@ -894,17 +879,17 @@ def render(sub_page, ID_PRICE_SUMMARY, ID_HISTORY_INWARD_FOLDER, ID_SHOPEE_MASTE
                         df_pending.to_excel(writer, index=False, sheet_name="尚未建立商品清單")
                     
                     st.download_button(
-                        label="📥 下載待處理清單報表 (.xlsx)",
+                        label="下載待處理清單",
                         data=towrite_pending.getvalue(),
                         file_name=f"尚未建立商品清單_匯出_{datetime.date.today().strftime('%Y%m%d')}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True
                     )
                     
-                    if st.button("🔄 重新載入最新雲端資料", use_container_width=True):
+                    if st.button("重新載入", use_container_width=True):
                         get_cached_gdrive_file_bytes.clear()
                         st.rerun()
                         
             except Exception as e:
-                st.error(f"❌ 讀取雲端清單失敗，可能是該檔案尚未被系統自動建立或權限不足。")
+                st.error("❌ 讀取雲端清單失敗（檔案未建立或權限不足）。")
 
