@@ -33,7 +33,7 @@ alwaysApply: false
 ## 建檔／結單
 
 - 結單日：活動表用 **DatetimeColumn** 挑選器；寫回／驗證字串 `YYYY-MM-DD HH:mm`。有 SKU 必填。**僅建檔子頁可編**。
-- 活動表另有「賣場後台連結」「日曆事件ID」。覆寫雲端成功後 `sync_preorder_calendar_events` upsert 指定日曆（`PREORDER_CALENDAR_ID`）；**同廠商檔名只一筆事件**；失敗不回滾 Drive。組內全實際關閉→標題 `[已結]…`、關提醒；組內皆無合格結單日→刪事件。
+- 活動表另有「賣場後台連結」「日曆事件ID」。覆寫雲端成功後 `sync_preorder_calendar_events` upsert 指定日曆（`PREORDER_CALENDAR_ID`）；**同廠商檔名只一筆事件**；失敗不回滾 Drive。提醒：共用日曆上 API `reminders` 只對 SA 私有，未關閉事件用 `useDefault: true`，成員須在該日曆設「活動通知 2 小時前」。組內全實際關閉→標題 `[已結]…`；組內皆無合格結單日→刪事件。
 - 廠商單匯入活動表（可無條碼；xlsx／xls）。upsert：條碼 → 檔名+貨號 → 檔名+品名。不覆蓋 SKU／自購／上限。已實際關閉列不覆寫貨號／品名／條碼。
 - **建碼：** 建檔頁「送交待審核」審核表（空 SKU）可改 L2／L3／L4／**產品關鍵字** → GAS batch（狀態＝預購）→ 回填 SKU、`SKU審核=待審核`。secrets 頂層 `SKU_SUBMIT_*`（勿放 `[textkey]` 內）；Web App `ANYONE_ANONYMOUS`＋`BATCH_API_TOKEN`。見 `secrets.mdc`／assistant `sku-submit.mdc`。
 - 已關閉列鎖自購／上限／SKU／月份／結單日；清空實際關閉＝重開。賣場後台連結關閉後仍可改。

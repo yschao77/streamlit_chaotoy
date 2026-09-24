@@ -631,15 +631,13 @@ def _preorder_calendar_event_body(month, vendor_label, cutoff_dt, closed, skus, 
     end_dt = cutoff_dt + datetime.timedelta(days=PREORDER_CALENDAR_EVENT_DAYS)
     start_s = cutoff_dt.strftime("%Y-%m-%dT%H:%M:%S")
     end_s = end_dt.strftime("%Y-%m-%dT%H:%M:%S")
+    # reminders 是「對寫入者（service account）私有」；在共用／group 日曆上
+    # 成員看不到 SA 設的 popup。未關閉改用 useDefault，讓每人在該日曆的
+    #「活動通知」生效（手冊：設 2 小時前）。已結則關掉覆寫，避免 SA 側殘留。
     if closed:
         reminders = {"useDefault": False, "overrides": []}
     else:
-        reminders = {
-            "useDefault": False,
-            "overrides": [
-                {"method": "popup", "minutes": PREORDER_CALENDAR_REMINDER_MINUTES},
-            ],
-        }
+        reminders = {"useDefault": True}
     return {
         "summary": _preorder_calendar_summary(month, vendor_label, closed),
         "description": _preorder_calendar_description(skus, listing_urls),
