@@ -10,6 +10,7 @@ import json
 import zipfile
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 
 # =========================================================================
@@ -57,6 +58,7 @@ HAS_CALAMINE = check_calamine()
 # 🌐 1. Google Drive 雲端連線初始化
 # =========================================================================
 DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
+CALENDAR_SCOPES = ["https://www.googleapis.com/auth/calendar"]
 XLSX_MIME_QUERY = (
     "(mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' "
     "or mimeType = 'application/vnd.ms-excel.sheet.macroEnabled.12')"
@@ -93,6 +95,12 @@ ID_PREORDER_TRACKER = "1aqfHIPvavWZhtLZMdFCOnyHtllHLrca-"
 ID_PREORDER_VENDOR_LOCK_FOLDER = "1QKHnKi9mbOjtmaWTu7ewGTswzfk71v1b"  # 結單紀錄資料夾；個人雲端無法 API 新建
 ID_PREORDER_VENDOR_LOCK_ARCHIVE = "1YYii3cqpHF6zY_CwUkm_TdcXsEBKDHhD"  # 預購結單紀錄.xlsx；彙整用，只 update、禁止 create
 ID_SG_RESTOCK_TEMPLATE = "1QZ-_PI3T2BtHjTwmrIAEG_RZKDlxhpqt"  # SiteGiant 採購單空殼；後台 Import Restock；禁止 update
+PREORDER_CALENDAR_ID = (
+    "3f480e6ab74d7aed8cd0338025c3f7b85a3abbcc906683414c41360c46a71e91@group.calendar.google.com"
+)
+PREORDER_CALENDAR_TZ = "Asia/Taipei"
+PREORDER_CALENDAR_EVENT_DAYS = 2
+PREORDER_CALENDAR_REMINDER_MINUTES = 120
 UPC_FILLED_FILENAME = "batch_edit_upc_added_only.xlsx"
 HISTORY_INWARD_INDEX_NAME = "入庫明細索引.xlsx"
 PREORDER_TRACKER_NAME = "預購追蹤.xlsx"
@@ -107,6 +115,7 @@ PREORDER_CAMPAIGN_COLUMNS = (
     "月份",
     "結單日",
     "SKU",
+    "SKU審核",
     "條碼",
     "貨號",
     "品名",
@@ -569,6 +578,238 @@ def get_drive_service():
     if _in_streamlit():
         return init_drive_service()
     return _build_drive_service()
+
+
+def _build_calendar_service():
+    info = load_google_service_account_info()
+    if not info:
+        raise RuntimeError("缺少 Google 憑證：請設定 GOOGLE_SERVICE_ACCOUNT_JSON 或 Streamlit Secrets `textkey`。")
+    credentials = service_account.Credentials.from_service_account_info(info, scopes=CALENDAR_SCOPES)
+    return build("calendar", "v3", credentials=credentials)
+
+
+@st.cache_resource
+def init_calendar_service():
+    return _build_calendar_service()
+
+
+def get_calendar_service():
+    if _in_streamlit():
+        return init_calendar_service()
+    return _build_calendar_service()
+
+
+def _http_error_status(exc):
+    if isinstance(exc, HttpError):
+        try:
+            return int(exc.resp.status)
+        except (TypeError, ValueError, AttributeError):
+            return None
+    return None
+
+
+def _preorder_calendar_summary(month, vendor_label, closed):
+    parts = [p for p in (_preorder_text(month), _preorder_text(vendor_label)) if p]
+    title_core = " ".join(parts) if parts else "未命名"
+    summary = f"[預購結單] {title_core}"
+    if closed:
+        return f"[已結]{summary}"
+    return summary
+
+
+def _preorder_calendar_description(skus, listing_urls):
+    lines = []
+    for url in listing_urls:
+        lines.append(f"賣場後台連結：{url}")
+    if skus:
+        lines.append("SKU：" + "、".join(skus))
+    lines.append("請至 Streamlit 預購追蹤結單")
+    return "\n".join(lines)
+
+
+def _preorder_calendar_event_body(month, vendor_label, cutoff_dt, closed, skus, listing_urls):
+    end_dt = cutoff_dt + datetime.timedelta(days=PREORDER_CALENDAR_EVENT_DAYS)
+    start_s = cutoff_dt.strftime("%Y-%m-%dT%H:%M:%S")
+    end_s = end_dt.strftime("%Y-%m-%dT%H:%M:%S")
+    if closed:
+        reminders = {"useDefault": False, "overrides": []}
+    else:
+        reminders = {
+            "useDefault": False,
+            "overrides": [
+                {"method": "popup", "minutes": PREORDER_CALENDAR_REMINDER_MINUTES},
+            ],
+        }
+    return {
+        "summary": _preorder_calendar_summary(month, vendor_label, closed),
+        "description": _preorder_calendar_description(skus, listing_urls),
+        "start": {"dateTime": start_s, "timeZone": PREORDER_CALENDAR_TZ},
+        "end": {"dateTime": end_s, "timeZone": PREORDER_CALENDAR_TZ},
+        "reminders": reminders,
+    }
+
+
+def _delete_preorder_calendar_event(service, event_id):
+    """刪除事件；404 視為已不存在。回傳 (ok, error_text_or_None)。"""
+    try:
+        service.events().delete(
+            calendarId=PREORDER_CALENDAR_ID,
+            eventId=event_id,
+        ).execute()
+        return True, None
+    except Exception as e:
+        if _http_error_status(e) == 404:
+            return True, None
+        return False, _status_error_text(e)
+
+
+def _upsert_preorder_calendar_event(service, event_id, body):
+    """更新或新建；update 404 則改 insert。回傳 (new_event_id, created_bool, error_or_None)。"""
+    if event_id:
+        try:
+            updated = service.events().update(
+                calendarId=PREORDER_CALENDAR_ID,
+                eventId=event_id,
+                body=body,
+            ).execute()
+            return _preorder_text(updated.get("id")) or event_id, False, None
+        except Exception as e:
+            if _http_error_status(e) != 404:
+                return event_id, False, _status_error_text(e)
+    try:
+        created = service.events().insert(
+            calendarId=PREORDER_CALENDAR_ID,
+            body=body,
+        ).execute()
+        return _preorder_text(created.get("id")), True, None
+    except Exception as e:
+        return event_id or "", False, _status_error_text(e)
+
+
+def sync_preorder_calendar_events(campaign_df):
+    """依活動表 upsert／刪除 Google 日曆事件，回寫日曆事件ID。
+
+    **同「廠商檔名」只建一筆事件**（多 SKU 共用）；無廠商檔名才依 SKU／列各建一筆。
+    有 SKU 且結單日可解析的列才納入該組；組內全無合格列但有事件 ID → 刪除並清空。
+    結單日取組內最早；組內全部實際關閉才標 [已結]。失敗不拋，列入 report.errors。
+    回傳 (updated_campaign_df, report)。
+    """
+    campaign = ensure_preorder_campaign_df(campaign_df).copy()
+    if "日曆事件ID" not in campaign.columns:
+        campaign["日曆事件ID"] = ""
+    report = {
+        "created": 0,
+        "updated": 0,
+        "deleted": 0,
+        "errors": [],
+        "changed": False,
+    }
+    if campaign.empty:
+        return campaign, report
+
+    try:
+        # 不用 cache／st.stop：Drive 已存檔時日曆失敗只記 warning
+        service = _build_calendar_service()
+    except Exception as e:
+        report["errors"].append(f"無法建立 Calendar 服務：{_status_error_text(e)}")
+        return campaign, report
+
+    groups = {}
+    for idx, row in campaign.iterrows():
+        vendor = _preorder_text(row.get("廠商檔名"))
+        if vendor:
+            key = ("vendor", vendor)
+        else:
+            sku = _preorder_text(row.get("SKU"))
+            key = ("sku", sku) if sku else ("row", int(idx))
+        groups.setdefault(key, []).append(idx)
+
+    for key, indices in groups.items():
+        if key[0] == "vendor":
+            label = _preorder_text(key[1]) or "（無廠商檔名）"
+        elif key[0] == "sku":
+            label = f"SKU `{key[1]}`"
+        else:
+            label = _campaign_row_label(campaign.loc[indices[0]])
+
+        eligible = []
+        for idx in indices:
+            row = campaign.loc[idx]
+            sku = _preorder_text(row.get("SKU"))
+            parsed = parse_preorder_cutoff_datetime(row.get("結單日"))
+            if sku and parsed is not None and parsed is not False:
+                eligible.append((idx, row, parsed))
+
+        existing_ids = []
+        for idx in indices:
+            eid = _preorder_text(campaign.at[idx, "日曆事件ID"])
+            if eid and eid not in existing_ids:
+                existing_ids.append(eid)
+
+        if not eligible:
+            # 組內無可同步列：刪掉曾有的事件 ID（去重後各刪一次）
+            for eid in existing_ids:
+                ok, err = _delete_preorder_calendar_event(service, eid)
+                if ok:
+                    report["deleted"] += 1
+                else:
+                    report["errors"].append(f"{label}：刪除日曆事件失敗 — {err}")
+            for idx in indices:
+                if _preorder_text(campaign.at[idx, "日曆事件ID"]):
+                    campaign.at[idx, "日曆事件ID"] = ""
+                    report["changed"] = True
+            continue
+
+        # 結單日：組內最早；月份／連結取第一個非空；全關閉才已結
+        cutoff = min(p for _, _, p in eligible)
+        month = ""
+        listing_urls = []
+        skus = []
+        for idx, row, _parsed in eligible:
+            if not month:
+                month = _preorder_text(row.get("月份"))
+            sku = _preorder_text(row.get("SKU"))
+            if sku and sku not in skus:
+                skus.append(sku)
+            url = _preorder_text(row.get("賣場後台連結"))
+            if url and url not in listing_urls:
+                listing_urls.append(url)
+        closed = all(bool(_preorder_text(campaign.at[idx, "實際關閉"])) for idx, _, _ in eligible)
+
+        if key[0] == "vendor":
+            vendor_label = key[1]
+        else:
+            vendor_label = skus[0] if skus else "未命名"
+
+        body = _preorder_calendar_event_body(
+            month, vendor_label, cutoff, closed, skus, listing_urls
+        )
+
+        # 保留第一個既有 ID 做 update；其餘多餘 ID（舊版每 SKU 一筆）刪掉
+        keep_id = existing_ids[0] if existing_ids else ""
+        for eid in existing_ids[1:]:
+            ok, err = _delete_preorder_calendar_event(service, eid)
+            if ok:
+                report["deleted"] += 1
+            else:
+                report["errors"].append(f"{label}：刪除重複日曆事件失敗 — {err}")
+
+        new_id, created, err = _upsert_preorder_calendar_event(service, keep_id, body)
+        if err:
+            report["errors"].append(f"{label}：日曆同步失敗 — {err}")
+            continue
+        if created:
+            report["created"] += 1
+        else:
+            report["updated"] += 1
+
+        # 同組所有列寫入同一日曆事件ID（含尚無 SKU／結單日的列，避免下次再建）
+        for idx in indices:
+            if _preorder_text(campaign.at[idx, "日曆事件ID"]) != _preorder_text(new_id):
+                campaign.at[idx, "日曆事件ID"] = new_id
+                report["changed"] = True
+
+    return campaign, report
 
 # =========================================================================
 # 🔍 2. 雲端核心實戰工具與搜尋常式
@@ -2048,26 +2289,70 @@ def save_preorder_tracker(
 ):
     if not ID_PREORDER_TRACKER:
         return {"ok": False, "reason": "未設定預購追蹤檔 ID。"}
+    campaign = ensure_preorder_campaign_df(campaign_df)
     payload = preorder_tracker_bytes(
-        campaign_df,
+        campaign,
         vendor_history_df,
         other_sheets,
         pending_df=pending_df,
         sku_status_df=sku_status_df,
         notify_df=notify_df,
     )
+    out_name = file_name or PREORDER_TRACKER_NAME
     try:
         upload_or_update_gdrive_file(
             ID_PREORDER_ORDERS_FOLDER,
-            file_name or PREORDER_TRACKER_NAME,
+            out_name,
             payload,
             existing_file_id=ID_PREORDER_TRACKER,
             allow_create=False,
         )
     except Exception as e:
         return {"ok": False, "reason": _status_error_text(e)}
+
+    campaign_synced, cal_report = sync_preorder_calendar_events(campaign)
+    calendar_warning = None
+    if cal_report.get("errors"):
+        shown = cal_report["errors"][:12]
+        calendar_warning = "日曆同步部分失敗（雲端預購追蹤已存檔，不回滾）：\n" + "\n".join(shown)
+        if len(cal_report["errors"]) > len(shown):
+            calendar_warning += f"\n…另有 {len(cal_report['errors']) - len(shown)} 筆"
+
+    if cal_report.get("changed"):
+        payload2 = preorder_tracker_bytes(
+            campaign_synced,
+            vendor_history_df,
+            other_sheets,
+            pending_df=pending_df,
+            sku_status_df=sku_status_df,
+            notify_df=notify_df,
+        )
+        try:
+            upload_or_update_gdrive_file(
+                ID_PREORDER_ORDERS_FOLDER,
+                out_name,
+                payload2,
+                existing_file_id=ID_PREORDER_TRACKER,
+                allow_create=False,
+            )
+            payload = payload2
+            campaign = campaign_synced
+        except Exception as e:
+            extra = f"日曆事件ID 回寫雲端失敗：{_status_error_text(e)}"
+            calendar_warning = f"{calendar_warning}\n{extra}" if calendar_warning else extra
+            campaign = campaign_synced
+    else:
+        campaign = campaign_synced
+
     get_cached_gdrive_file_bytes.clear()
-    return {"ok": True, "bytes": payload, "name": file_name or PREORDER_TRACKER_NAME}
+    return {
+        "ok": True,
+        "bytes": payload,
+        "name": out_name,
+        "campaign": campaign,
+        "calendar": cal_report,
+        "calendar_warning": calendar_warning,
+    }
 
 
 def _preorder_text(val):

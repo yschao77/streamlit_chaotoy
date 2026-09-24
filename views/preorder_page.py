@@ -58,6 +58,15 @@ from utils import (
     PREORDER_SKU_OVERVIEW_COLUMNS,
     cutoff_to_datetime,
     format_preorder_cutoff_datetime,
+    is_preorder_row_closed,
+)
+
+from sku_submit_client import (
+    category_code_options,
+    fetch_sku_form_meta,
+    sku_submit_configured,
+    suggest_from_name,
+    submit_pending_batch,
 )
 
 
@@ -73,6 +82,7 @@ PREORDER_CAMPAIGN_UI_COLUMN_ORDER = (
     "月份",
     "結單日",
     "SKU",
+    "SKU審核",
     "自購",
     "上限",
     "品名",
@@ -170,11 +180,37 @@ def _save_preorder_tracker_button(campaign_df, key, *, primary=True):
         return
     result = _persist_preorder_tracker(campaign_df)
     if result.get("ok"):
-        st.session_state["preorder_save_ok"] = True
-        get_cached_gdrive_file_bytes.clear()
-        st.session_state.pop("preorder_loaded", None)
+        _apply_preorder_save_success(result)
         st.rerun()
     st.error(f"❌ 寫回失敗：{result.get('reason') or '未知錯誤'}")
+
+
+def _apply_preorder_save_success(result):
+    """存檔成功後更新 session，並記日曆 warning（若有）。"""
+    if result.get("campaign") is not None:
+        st.session_state["preorder_campaign_df"] = result["campaign"]
+    warning = result.get("calendar_warning")
+    if warning:
+        st.session_state["preorder_calendar_warning"] = warning
+    else:
+        st.session_state.pop("preorder_calendar_warning", None)
+    st.session_state["preorder_save_ok"] = True
+    cal = result.get("calendar") or {}
+    bits = []
+    if cal.get("created"):
+        bits.append(f"新建 {cal['created']}")
+    if cal.get("updated"):
+        bits.append(f"更新 {cal['updated']}")
+    if cal.get("deleted"):
+        bits.append(f"刪除 {cal['deleted']}")
+    if bits and not warning:
+        st.session_state["preorder_calendar_ok"] = "日曆：" + "、".join(bits)
+    elif not warning:
+        st.session_state.pop("preorder_calendar_ok", None)
+    get_cached_gdrive_file_bytes.clear()
+    st.session_state.pop("preorder_loaded", None)
+    # 清編輯器 base，避免舊「日曆事件ID」空白把剛同步的 ID 蓋掉造成重複建事件
+    _clear_preorder_campaign_editor()
 
 
 def _persist_preorder_tracker(campaign_df):
@@ -211,6 +247,11 @@ PREORDER_STAGE_ICONS = {
     "完成": "🟢",
 }
 
+# 共用短句：錯誤／空狀態「問題 → 下一步」
+MSG_LOAD_ORDERS = "請先到「對訂單」載入 All Orders。"
+MSG_ORDERS_LOAD_FAIL = "無法載入 All Orders。可改上方本機上傳，或檢查資料夾權限與檔名。"
+MSG_TRACKER_LOAD_FAIL = "無法載入預購追蹤。請確認該檔有編輯權，且為 .xlsx。"
+
 
 def _render_preorder_lifecycle_overview(
     campaign_df, sku_status_df, unpaid_skus=None, accepted_qty_by_sku=None
@@ -218,7 +259,7 @@ def _render_preorder_lifecycle_overview(
     """頁面最上方的生命週期總覽：依「實際關閉」＋「SKU狀態」把每個活動列分到 4 個階段。"""
     staged = compute_preorder_campaign_stages(campaign_df, sku_status_df, unpaid_skus)
     if staged.empty:
-        st.caption("活動表沒有列，暫無生命週期總覽。")
+        st.caption("活動表沒有列。")
         return
 
     if accepted_qty_by_sku is not None:
@@ -236,15 +277,9 @@ def _render_preorder_lifecycle_overview(
 
     captions = []
     if unpaid_skus is None:
-        captions.append(
-            "「催款中」目前只要已到貨就列在這裡，還沒對到 All Orders 未付款件數，"
-            "所以看不到「完成」；請到「對訂單」子頁載入 All Orders 後這裡會自動補上。"
-        )
+        captions.append(f"催款／完成需訂單資料。{MSG_LOAD_ORDERS}")
     if accepted_qty_by_sku is None:
-        captions.append(
-            "「已結單待到貨」目前還沒排除沒有預購訂單的 SKU；"
-            "請到「對訂單」子頁載入 All Orders 後這裡會自動篩掉。"
-        )
+        captions.append(f"「已結單待到貨」尚未排除零訂單 SKU。{MSG_LOAD_ORDERS}")
     if captions:
         st.caption(" ".join(captions))
 
@@ -272,8 +307,13 @@ def _preorder_campaign_column_config(disabled_cols=()):
         ),
         "SKU": st.column_config.TextColumn(
             "SKU",
-            help="自定義編碼／庫存 SKU；四款請填四個不同 SKU。匯入廠商單不會填這欄。",
+            help="自定義編碼／庫存 SKU；四款請填四個不同 SKU。匯入廠商單不會填這欄；請用下方「送交待審核」產生。",
             disabled=d("SKU"),
+        ),
+        "SKU審核": st.column_config.TextColumn(
+            "SKU審核",
+            help="送審後為「待審核」；老闆核准進正式表後可改為「已入正式表」或清空。",
+            disabled=d("SKU審核"),
         ),
         "條碼": st.column_config.TextColumn("條碼", help="GTIN／c"),
         "貨號": st.column_config.TextColumn("貨號", help="廠商貨號（來自訂購單，不是庫存 SKU）"),
@@ -527,7 +567,7 @@ def _render_preorder_orders_board(campaign_df):
 
     if not loaded_orders.get("ok"):
         st.error(f"❌ 無法載入 All Orders：{loaded_orders.get('reason') or '未知錯誤'}")
-        st.info("可改上方本機上傳預覽，或檢查 All Orders 資料夾權限與檔名。")
+        st.info(MSG_ORDERS_LOAD_FAIL)
         st.session_state["preorder_orders_synced"] = False
         sku_status = ensure_preorder_sku_status_df(st.session_state.get("preorder_sku_status_df"))
         pending = st.session_state.get("preorder_pending_df")
@@ -691,7 +731,7 @@ def _render_preorder_sku_overview_and_detail(board, sku_status, pending, campaig
 
         overview = build_preorder_sku_overview(board, sku_status, stage_by_sku)
         if overview.empty:
-            st.info("目前沒有任何 SKU（活動表沒填 SKU，也還沒有 All Orders 資料）。")
+            st.info("目前沒有 SKU。")
         else:
             search = st.text_input(
                 "🔎 搜尋 SKU／品名",
@@ -721,7 +761,7 @@ def _render_preorder_sku_overview_and_detail(board, sku_status, pending, campaig
                 detail = attach_preorder_notify_days(detail, st.session_state.get("preorder_notify_df"))
                 st.dataframe(detail, use_container_width=True, hide_index=True)
             elif picked:
-                st.info("目前沒有訂單資料可顯示明細（All Orders 還沒載入）。")
+                st.info("尚無訂單明細（All Orders 未載入）。")
             else:
                 st.caption("選取 SKU 後顯示明細。")
 
@@ -762,7 +802,7 @@ def _render_preorder_arrival_status_editor(campaign_df, orders_df, sku_status_df
     stage_by_sku = _preorder_stage_by_sku(board, campaign_df, sku_status)
     overview = build_preorder_sku_overview(board, sku_status, stage_by_sku)
     if overview.empty:
-        st.info("目前沒有可標到貨的 SKU（活動表沒填 SKU，也還沒有 All Orders／SKU 狀態）。")
+        st.info("目前沒有可標到貨的 SKU。")
         return sku_status
 
     # 只列尚未標到貨（狀態＝預購）且已接單（客戶量）＞0；已到貨／零接單不出現在這張編輯表。
@@ -780,9 +820,9 @@ def _render_preorder_arrival_status_editor(campaign_df, orders_df, sku_status_df
     st.caption(f"待標到貨 {len(pending_arrival)} 列（已結單待到貨 {awaiting_n}）。")
     if pending_arrival.empty:
         if orders_df is None:
-            st.info("請先到「對訂單」載入 All Orders，才會列出有客戶量的待標到貨 SKU。")
+            st.info(MSG_LOAD_ORDERS)
         else:
-            st.info("沒有待標到貨的 SKU（狀態都已是到貨、已接單為 0，或尚無 SKU）。")
+            st.info("沒有待標到貨的 SKU。")
         return sku_status
 
     search = st.text_input(
@@ -817,10 +857,12 @@ def _stamp_and_persist_notify(campaign_df, keys):
         msg = "沒有新的未付款列可點日期（可能已點過，或沒有到貨未付款單）。"
     if save_result.get("ok"):
         msg += " 已寫入雲端工作表「通知紀錄」與「預購訂單」。"
-        get_cached_gdrive_file_bytes.clear()
-        st.session_state.pop("preorder_loaded", None)
+        _apply_preorder_save_success(save_result)
+        st.session_state.pop("preorder_save_ok", None)  # 催款用自有 msg，不顯示通用存檔成功
     else:
         msg += " 畫面已有日期，但雲端尚未寫回：" + (save_result.get("reason") or "未知錯誤")
+    if save_result.get("calendar_warning"):
+        st.session_state["preorder_calendar_warning"] = save_result["calendar_warning"]
     st.session_state["preorder_notify_msg"] = msg
     st.rerun()
 
@@ -833,7 +875,7 @@ def _render_preorder_arrival_copy(campaign_df, orders_df, sku_status_df):
     )
     st.write("---")
     if orders_df is None:
-        st.info("請先到「對訂單」載入 All Orders，才會出現催款／可打單名單。")
+        st.info(MSG_LOAD_ORDERS)
         return
     arrived_campaign = campaign_df_from_arrived_skus(sku_status_df)
     board = build_preorder_board(arrived_campaign, orders_df)
@@ -1031,6 +1073,219 @@ def _render_preorder_vendor_import(campaign_df):
     return campaign_df
 
 
+def _render_preorder_sku_pending_review(campaign_df):
+    """空 SKU 列：審核分類後送交待審核，回填碼並標 SKU審核=待審核。"""
+    st.markdown("### 送交待審核（空 SKU）")
+    st.caption(
+        "確認第二／三／四分類與產品關鍵字後按「送交待審核」。狀態固定預購；"
+        "成功後回填 SKU 並標「待審核」。老闆核准正式表後再改標籤。"
+    )
+    campaign = ensure_preorder_campaign_df(campaign_df)
+    if "SKU審核" not in campaign.columns:
+        campaign["SKU審核"] = ""
+
+    if not sku_submit_configured():
+        st.info(
+            "尚未設定 `SKU_SUBMIT_WEBAPP_URL`（`.streamlit/secrets.toml`）。"
+            "可先手填 SKU，或設定 Web App `/exec` 網址後再批次送審。"
+            "若 Script Properties 有 `BATCH_API_TOKEN`，請一併設 `SKU_SUBMIT_BATCH_TOKEN`。"
+        )
+        return campaign
+
+    rows = []
+    for idx, camp in campaign.iterrows():
+        if is_preorder_row_closed(camp):
+            continue
+        if _preorder_text(camp.get("SKU")):
+            continue
+        pname = _preorder_text(camp.get("品名"))
+        if not pname:
+            continue
+        rows.append(
+            {
+                "送審": True,
+                "index": int(idx),
+                "品名": pname,
+                "條碼": clean_barcode(camp.get("條碼")),
+                "貨號": _preorder_text(camp.get("貨號")),
+                "第二分類": "",
+                "第三分類": "",
+                "第四分類": "NEW",
+                "產品關鍵字": "",
+            }
+        )
+
+    if not rows:
+        st.caption("沒有待補 SKU 的進行中列。匯入廠商單後空 SKU 列會出現在這裡。")
+        return campaign
+
+    meta = fetch_sku_form_meta()
+    if not meta.get("ok"):
+        st.warning(meta.get("message") or "無法載入分類對應表；仍可手填分類代碼後送審。")
+    l2_opts = category_code_options(meta, "l2")
+    l3_opts = category_code_options(meta, "l3")
+    l4_opts = category_code_options(meta, "l4") or ["NEW", "SEC"]
+
+    base = pd.DataFrame(rows)
+    override = st.session_state.pop("preorder_sku_review_df", None)
+    if isinstance(override, pd.DataFrame) and not override.empty:
+        # keep用户 edits when re-running suggest
+        by_idx = {int(r["index"]): r for r in override.to_dict(orient="records")}
+        merged = []
+        for r in rows:
+            prev = by_idx.get(int(r["index"]))
+            if prev:
+                r = {
+                    **r,
+                    "送審": bool(prev.get("送審", True)),
+                    "第二分類": _preorder_text(prev.get("第二分類")) or r["第二分類"],
+                    "第三分類": _preorder_text(prev.get("第三分類")) or r["第三分類"],
+                    "第四分類": _preorder_text(prev.get("第四分類")) or r["第四分類"],
+                    "品名": _preorder_text(prev.get("品名")) or r["品名"],
+                    "產品關鍵字": _preorder_text(prev.get("產品關鍵字")),
+                    "條碼": clean_barcode(prev.get("條碼"))
+                    if prev.get("條碼") is not None
+                    else r["條碼"],
+                }
+            merged.append(r)
+        base = pd.DataFrame(merged)
+
+    col_cfg = {
+        "送審": st.column_config.CheckboxColumn("送審", default=True),
+        "index": st.column_config.NumberColumn("index", disabled=True),
+        "貨號": st.column_config.TextColumn("貨號", disabled=True),
+        "條碼": st.column_config.TextColumn("條碼"),
+        "品名": st.column_config.TextColumn("品名"),
+        "產品關鍵字": st.column_config.TextColumn(
+            "產品關鍵字", help="可空；「依品名建議分類」可預填，送審前可改"
+        ),
+        "第四分類": st.column_config.SelectboxColumn("第四分類", options=l4_opts, required=True),
+    }
+    if l2_opts:
+        col_cfg["第二分類"] = st.column_config.SelectboxColumn(
+            "第二分類", options=[""] + l2_opts, required=True
+        )
+    if l3_opts:
+        col_cfg["第三分類"] = st.column_config.SelectboxColumn(
+            "第三分類", options=[""] + l3_opts, required=True
+        )
+
+    edited = st.data_editor(
+        base,
+        hide_index=True,
+        use_container_width=True,
+        disabled=["index", "貨號"],
+        column_config=col_cfg,
+        column_order=[
+            "送審",
+            "品名",
+            "條碼",
+            "貨號",
+            "第二分類",
+            "第三分類",
+            "第四分類",
+            "產品關鍵字",
+            "index",
+        ],
+        key="preorder_sku_pending_editor",
+    )
+
+    b1, b2 = st.columns(2)
+    with b1:
+        if st.button("依品名建議分類", use_container_width=True, key="preorder_sku_suggest_btn"):
+            suggested_rows = []
+            for rec in edited.to_dict(orient="records"):
+                if not rec.get("送審"):
+                    suggested_rows.append(rec)
+                    continue
+                name = _preorder_text(rec.get("品名"))
+                sug = suggest_from_name(name) if name else {}
+                if sug.get("ok"):
+                    rec = dict(rec)
+                    if sug.get("第二分類"):
+                        rec["第二分類"] = sug["第二分類"]
+                    if sug.get("第三分類"):
+                        rec["第三分類"] = sug["第三分類"]
+                    if sug.get("第四分類"):
+                        rec["第四分類"] = sug["第四分類"]
+                    if sug.get("產品關鍵字") and not _preorder_text(rec.get("產品關鍵字")):
+                        rec["產品關鍵字"] = sug["產品關鍵字"]
+                suggested_rows.append(rec)
+            st.session_state["preorder_sku_review_df"] = pd.DataFrame(suggested_rows)
+            st.session_state.pop("preorder_sku_pending_editor", None)
+            st.rerun()
+    with b2:
+        n_sel = sum(1 for rec in edited.to_dict(orient="records") if rec.get("送審"))
+        confirm = st.button(
+            f"送交待審核（{n_sel} 筆）",
+            type="primary",
+            use_container_width=True,
+            key="preorder_sku_submit_btn",
+            disabled=n_sel < 1,
+        )
+
+    if not confirm:
+        return campaign
+
+    payload = []
+    indices = []
+    for rec in edited.to_dict(orient="records"):
+        if not rec.get("送審"):
+            continue
+        l2 = _preorder_text(rec.get("第二分類"))
+        l3 = _preorder_text(rec.get("第三分類"))
+        l4 = _preorder_text(rec.get("第四分類")).upper() or "NEW"
+        name = _preorder_text(rec.get("品名"))
+        if not name or not l2 or not l3 or l4 not in ("NEW", "SEC"):
+            st.error(
+                f"第 index={rec.get('index')} 列缺品名或分類（L4 須 NEW／SEC），修正後再送。"
+            )
+            return campaign
+        payload.append(
+            {
+                "狀態": "預購",
+                "品名": name,
+                "c": clean_barcode(rec.get("條碼")),
+                "第二分類": l2,
+                "第三分類": l3,
+                "第四分類": l4,
+                "產品關鍵字": _preorder_text(rec.get("產品關鍵字")),
+            }
+        )
+        indices.append(int(rec["index"]))
+
+    with st.spinner(f"送交 {len(payload)} 筆待審核…"):
+        result = submit_pending_batch(payload)
+
+    if not result.get("ok"):
+        st.error(result.get("message") or "送審失敗")
+        return campaign
+
+    out_rows = result.get("rows") or []
+    if len(out_rows) != len(indices):
+        st.error("回傳筆數與送審筆數不符，未寫入活動表 SKU。請查待審核表。")
+        return campaign
+
+    for i, camp_idx in enumerate(indices):
+        sku = _preorder_text(out_rows[i].get("自定義編碼"))
+        if camp_idx not in campaign.index:
+            continue
+        campaign.at[camp_idx, "SKU"] = sku
+        campaign.at[camp_idx, "SKU審核"] = "待審核"
+
+    st.session_state["preorder_campaign_df"] = ensure_preorder_campaign_df(campaign)
+    _clear_preorder_campaign_editor()
+    st.session_state.pop("preorder_sku_pending_editor", None)
+    st.session_state.pop("preorder_sku_review_df", None)
+    msg = result.get("message") or f"已送交 {len(out_rows)} 筆待審核"
+    codes = "、".join(_preorder_text(r.get("自定義編碼")) for r in out_rows[:8])
+    if len(out_rows) > 8:
+        codes += "…"
+    st.session_state["preorder_sku_submit_msg"] = f"{msg}：{codes}"
+    st.rerun()
+    return campaign
+
+
 def _selected_lock_indices(edited_df):
     if edited_df is None or getattr(edited_df, "empty", True):
         return []
@@ -1170,8 +1425,7 @@ def _render_preorder_close(campaign_df, orders_df):
     if preview and not lock_result:
         preview_selected = st.session_state.get("preorder_lock_selected") or []
         st.info(
-            f"以下為預覽（{len(preview.get('locked_rows') or [])} 列），尚未寫入廠商單歷史。"
-            " 核對後再按確認鎖定。若改了勾選或自購請再按預覽。"
+            f"預覽 {len(preview.get('locked_rows') or [])} 列（尚未寫入歷史）。核對後按確認鎖定。"
         )
         selection_changed = set(preview_selected) != set(selected_indices)
         self_buy_changed = st.session_state.get(
@@ -1387,11 +1641,17 @@ def _render_shared_shell():
     loaded = _ensure_preorder_loaded()
     if not loaded.get("ok"):
         st.error(f"❌ 無法載入預購追蹤：{loaded.get('reason') or '未知錯誤'}")
-        st.info("請確認該檔有編輯權，且為 .xlsx。")
+        st.info(MSG_TRACKER_LOAD_FAIL)
         return None
 
     if st.session_state.pop("preorder_save_ok", False):
         st.success("已覆寫雲端預購追蹤.xlsx。")
+    cal_ok = st.session_state.pop("preorder_calendar_ok", None)
+    if cal_ok:
+        st.success(cal_ok)
+    cal_warn = st.session_state.pop("preorder_calendar_warning", None)
+    if cal_warn:
+        st.warning(cal_warn)
     import_msg = st.session_state.pop("preorder_vendor_import_msg", None)
     if import_msg:
         st.success(import_msg)
@@ -1431,7 +1691,7 @@ def _nav_to(sub_page_label):
 
 
 def _render_overview(campaign_df):
-    st.markdown("### 🗺️ 生命週期總覽")
+    st.markdown("### 生命週期總覽")
     if "preorder_orders_loaded" not in st.session_state:
         with st.spinner("⏳ 正在載入雲端最新 All Orders…"):
             st.session_state["preorder_orders_loaded"] = load_preorder_orders()
@@ -1483,6 +1743,14 @@ def render(sub_page):
         edited = st.session_state.get("preorder_campaign_df", campaign)
         edited = _render_preorder_vendor_import(edited)
         st.session_state["preorder_campaign_df"] = edited
+        if st.session_state.get("preorder_vendor_import_msg"):
+            st.success(st.session_state.pop("preorder_vendor_import_msg"))
+        edited = _render_preorder_sku_pending_review(
+            st.session_state.get("preorder_campaign_df", edited)
+        )
+        st.session_state["preorder_campaign_df"] = edited
+        if st.session_state.get("preorder_sku_submit_msg"):
+            st.success(st.session_state.pop("preorder_sku_submit_msg"))
         st.markdown("### 補賣場資料並存檔")
         _render_preorder_campaign_editor()
         edited = st.session_state.get("preorder_campaign_df", campaign)
@@ -1522,7 +1790,7 @@ def render(sub_page):
                 st.session_state["preorder_orders_loaded"] = load_preorder_orders()
             orders_df = _session_orders_df()
         if orders_df is None:
-            st.info("尚無 All Orders。請先到「對訂單」載入雲端或本機預覽後再結單。")
+            st.info(f"尚無 All Orders。{MSG_LOAD_ORDERS}")
         _render_preorder_close(
             st.session_state.get("preorder_campaign_df", campaign), orders_df
         )

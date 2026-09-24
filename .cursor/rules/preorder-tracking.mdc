@@ -32,15 +32,17 @@ alwaysApply: false
 
 ## 建檔／結單
 
-- 結單日：活動表用 **DatetimeColumn** 挑選器；寫回／驗證字串 `YYYY-MM-DD HH:mm`。有 SKU 必填。
+- 結單日：活動表用 **DatetimeColumn** 挑選器；寫回／驗證字串 `YYYY-MM-DD HH:mm`。有 SKU 必填。**僅建檔子頁可編**。
+- 活動表另有「賣場後台連結」「日曆事件ID」。覆寫雲端成功後 `sync_preorder_calendar_events` upsert 指定日曆（`PREORDER_CALENDAR_ID`）；**同廠商檔名只一筆事件**；失敗不回滾 Drive。組內全實際關閉→標題 `[已結]…`、關提醒；組內皆無合格結單日→刪事件。
 - 廠商單匯入活動表（可無條碼；xlsx／xls）。upsert：條碼 → 檔名+貨號 → 檔名+品名。不覆蓋 SKU／自購／上限。已實際關閉列不覆寫貨號／品名／條碼。
-- 已關閉列鎖自購／上限／SKU／月份／結單日；清空實際關閉＝重開。
+- **建碼：** 建檔頁「送交待審核」審核表（空 SKU）可改 L2／L3／L4／**產品關鍵字** → GAS batch（狀態＝預購）→ 回填 SKU、`SKU審核=待審核`。secrets 頂層 `SKU_SUBMIT_*`（勿放 `[textkey]` 內）；Web App `ANYONE_ANONYMOUS`＋`BATCH_API_TOKEN`。見 `secrets.mdc`／assistant `sku-submit.mdc`。
+- 已關閉列鎖自購／上限／SKU／月份／結單日；清空實際關閉＝重開。賣場後台連結關閉後仍可改。
 - 鎖定數量＝`自購 + min(客戶量, 上限)`。未勾選／已關閉不重算。回填只改訂量（先條碼再貨號）。SiteGiant 採購單空殼只本機下載，禁止覆寫 `ID_SG_RESTOCK_TEMPLATE`。
 - 結單同步：優先 update 同名 `{stem}_結單紀錄.xlsx` 或彙整檔 `ID_PREORDER_VENDOR_LOCK_ARCHIVE`；`files.create` 僅次要。檔名剝 `_訂量` 再加 `_結單紀錄`。
 - All Orders 讀 `ID_SITEGIANT_ALL_ORDERS_FOLDER` 最新 `Orders_DD-MM-YYYY-*.zip`，解成 xlsx。
 
 ## 待做／刻意不做（勿當缺口亂補）
 
-- **已拍板、尚待實作：** 結單日 × Google 日曆（覆寫雲端後 upsert；見計畫 `結單日_google_日曆`）。活動表欄位已備；Calendar API／hook 未做。
-- **待拍板規格後再做：** 匯入廠商訂購單時**自動產生 SKU**（現況：寫入活動表不填 SKU，手填自定義編碼；見計畫 `匯入自動產生sku`）。
+- **已完成：** 結單日 × Google 日曆（覆寫雲端後 upsert；見計畫 `結單日_google_日曆`）。
+- **已實作：** 建檔「送交待審核」→ GAS batch（含產品關鍵字）；非匯入即靜默建碼。
 - **未拍板前不動工：** 入庫分配（第一版仍 SiteGiant）、商品清單帶廠商貨號、預購訂單歷史流水帳。
